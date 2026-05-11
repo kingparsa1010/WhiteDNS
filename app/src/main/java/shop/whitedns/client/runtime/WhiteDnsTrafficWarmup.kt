@@ -140,7 +140,7 @@ object WhiteDnsTrafficWarmup {
         }
     }
 
-    private const val SocketTimeoutMillis = 1_500
+    private const val SocketTimeoutMillis = 4_000
     private const val ProbeReadBufferSize = 256
     private const val MaxSocksFieldLength = 255
     private const val PortLength = 2

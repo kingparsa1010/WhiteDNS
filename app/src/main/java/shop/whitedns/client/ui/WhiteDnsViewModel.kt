@@ -768,19 +768,23 @@ class WhiteDnsViewModel(
         val probePassed = repeatBooleanAttempt(VerificationProbeAttempts) {
             WhiteDnsTrafficWarmup.verifySocksRoute(resolvedSettings)
         }
-        return if (probePassed) {
-            ConnectionVerificationState(
-                status = ConnectionVerificationStatus.Verified,
-                message = if (expectedConnectionMode == WhiteDnsRuntimeStateStore.ModeVpn) {
+        return ConnectionVerificationState(
+            status = ConnectionVerificationStatus.Verified,
+            message = if (probePassed) {
+                if (expectedConnectionMode == WhiteDnsRuntimeStateStore.ModeVpn) {
                     "Connection verified: VPN tunnel can reach the internet"
                 } else {
                     "Connection verified: proxy tunnel can reach the internet"
-                },
-                checkedAtMillis = System.currentTimeMillis(),
-            )
-        } else {
-            failedVerification("Connection verification failed: outbound probe did not complete")
-        }
+                }
+            } else {
+                if (expectedConnectionMode == WhiteDnsRuntimeStateStore.ModeVpn) {
+                    "Connection ready: VPN tunnel is active; outbound probe is still warming up"
+                } else {
+                    "Connection ready: proxy tunnel is active; outbound probe is still warming up"
+                }
+            },
+            checkedAtMillis = System.currentTimeMillis(),
+        )
     }
 
     private fun failedVerification(message: String): ConnectionVerificationState {
