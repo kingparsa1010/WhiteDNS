@@ -26,6 +26,7 @@ import java.net.InetSocketAddress
 import java.net.NetworkInterface
 import java.net.Socket
 import java.util.Collections
+import java.util.UUID
 import shop.whitedns.client.model.ConnectionProgressState
 import shop.whitedns.client.model.ConnectionStats
 import shop.whitedns.client.model.ConnectionStatus
@@ -291,6 +292,7 @@ class WhiteDnsViewModel(
 
             activeServerProfile = serverProfile
             val runtimeSettings = settings.runtimeConnectionSettings()
+            val sessionId = UUID.randomUUID().toString()
             uiState = uiState.copy(
                 settings = settings,
                 activeConnectionProfileId = connectionProfile.id,
@@ -316,6 +318,7 @@ class WhiteDnsViewModel(
                         appendLog("Starting full-device VPN service")
                         WhiteDnsVpnService.start(
                             context = getApplication<Application>().applicationContext,
+                            sessionId = sessionId,
                             serverProfile = serverProfile,
                             settings = runtimeSettings,
                         )
@@ -324,6 +327,7 @@ class WhiteDnsViewModel(
                         appendLog("Starting local proxy service")
                         WhiteDnsProxyService.start(
                             context = getApplication<Application>().applicationContext,
+                            sessionId = sessionId,
                             serverProfile = serverProfile,
                             settings = runtimeSettings,
                         )
@@ -692,6 +696,7 @@ class WhiteDnsViewModel(
             runCatching {
                 WhiteDnsVpnService.start(
                     context = getApplication<Application>().applicationContext,
+                    sessionId = UUID.randomUUID().toString(),
                     serverProfile = activeServerProfile,
                     settings = settings.runtimeConnectionSettings(),
                 )
