@@ -41,6 +41,9 @@ class WhiteDnsSettingsStore(
         val resolverProfiles = decodeResolverProfiles(
             raw = preferences.getString(KeyResolverProfiles, null),
         )
+        val advancedProfiles = decodeAdvancedProfiles(
+            raw = preferences.getString(KeyAdvancedProfiles, null),
+        )
         return WhiteDnsSettings(
             selectedConnectionProfileId = preferences.getString(
                 KeySelectedConnectionProfileId,
@@ -50,6 +53,11 @@ class WhiteDnsSettingsStore(
             selectedResolverProfileId = preferences.getString(KeySelectedResolverProfileId, defaults.selectedResolverProfileId)
                 ?: defaults.selectedResolverProfileId,
             resolverProfiles = resolverProfiles,
+            selectedAdvancedProfileId = preferences.getString(
+                KeySelectedAdvancedProfileId,
+                defaults.selectedAdvancedProfileId,
+            ) ?: defaults.selectedAdvancedProfileId,
+            advancedProfiles = advancedProfiles,
             serverMode = legacyServerMode,
             customServerDomain = legacyCustomServerDomain,
             customServerEncryptionKey = legacyCustomServerEncryptionKey,
@@ -185,6 +193,8 @@ class WhiteDnsSettingsStore(
             .putString(KeyConnectionProfiles, encodeConnectionProfiles(normalizedSettings.connectionProfiles))
             .putString(KeySelectedResolverProfileId, normalizedSettings.selectedResolverProfileId)
             .putString(KeyResolverProfiles, encodeResolverProfiles(normalizedSettings.resolverProfiles))
+            .putString(KeySelectedAdvancedProfileId, normalizedSettings.selectedAdvancedProfileId)
+            .putString(KeyAdvancedProfiles, encodeAdvancedProfiles(normalizedSettings.advancedProfiles))
             .putString(KeyServerMode, normalizedSettings.serverMode)
             .putString(KeyCustomServerDomain, normalizedSettings.customServerDomain)
             .putString(KeyCustomServerEncryptionKey, normalizedSettings.customServerEncryptionKey)
@@ -328,6 +338,221 @@ class WhiteDnsSettingsStore(
         return array.toString()
     }
 
+    private fun decodeAdvancedProfiles(raw: String?): List<AdvancedSettingsProfile> {
+        if (raw.isNullOrBlank()) {
+            return emptyList()
+        }
+        return runCatching {
+            val defaultProfile = AdvancedSettingsProfile.defaultProfile()
+            val array = JSONArray(raw)
+            List(array.length()) { index ->
+                val item = array.getJSONObject(index)
+                AdvancedSettingsProfile(
+                    id = item.optString("id"),
+                    name = item.optString("name", "Advanced Settings"),
+                    listenIp = item.optString("listenIp", defaultProfile.listenIp),
+                    listenPort = item.optString("listenPort", defaultProfile.listenPort),
+                    httpProxyEnabled = item.optBoolean("httpProxyEnabled", defaultProfile.httpProxyEnabled),
+                    httpProxyPort = item.optString("httpProxyPort", defaultProfile.httpProxyPort),
+                    socks5Authentication = item.optBoolean(
+                        "socks5Authentication",
+                        defaultProfile.socks5Authentication,
+                    ),
+                    socksUsername = item.optString("socksUsername", defaultProfile.socksUsername),
+                    socksPassword = item.optString("socksPassword", defaultProfile.socksPassword),
+                    balancingStrategy = item.optInt("balancingStrategy", defaultProfile.balancingStrategy),
+                    uploadDuplication = item.optString("uploadDuplication", defaultProfile.uploadDuplication),
+                    downloadDuplication = item.optString("downloadDuplication", defaultProfile.downloadDuplication),
+                    uploadCompression = item.optInt("uploadCompression", defaultProfile.uploadCompression),
+                    downloadCompression = item.optInt("downloadCompression", defaultProfile.downloadCompression),
+                    baseEncodeData = item.optBoolean("baseEncodeData", defaultProfile.baseEncodeData),
+                    minUploadMtu = item.optString("minUploadMtu", defaultProfile.minUploadMtu),
+                    minDownloadMtu = item.optString("minDownloadMtu", defaultProfile.minDownloadMtu),
+                    maxUploadMtu = item.optString("maxUploadMtu", defaultProfile.maxUploadMtu),
+                    maxDownloadMtu = item.optString("maxDownloadMtu", defaultProfile.maxDownloadMtu),
+                    mtuTestRetriesResolvers = item.optString(
+                        "mtuTestRetriesResolvers",
+                        defaultProfile.mtuTestRetriesResolvers,
+                    ),
+                    mtuTestTimeoutResolvers = item.optString(
+                        "mtuTestTimeoutResolvers",
+                        defaultProfile.mtuTestTimeoutResolvers,
+                    ),
+                    mtuTestParallelismResolvers = item.optString(
+                        "mtuTestParallelismResolvers",
+                        defaultProfile.mtuTestParallelismResolvers,
+                    ),
+                    mtuTestRetriesLogs = item.optString(
+                        "mtuTestRetriesLogs",
+                        defaultProfile.mtuTestRetriesLogs,
+                    ),
+                    mtuTestTimeoutLogs = item.optString(
+                        "mtuTestTimeoutLogs",
+                        defaultProfile.mtuTestTimeoutLogs,
+                    ),
+                    mtuTestParallelismLogs = item.optString(
+                        "mtuTestParallelismLogs",
+                        defaultProfile.mtuTestParallelismLogs,
+                    ),
+                    rxTxWorkers = item.optString("rxTxWorkers", defaultProfile.rxTxWorkers),
+                    tunnelProcessWorkers = item.optString(
+                        "tunnelProcessWorkers",
+                        defaultProfile.tunnelProcessWorkers,
+                    ),
+                    tunnelPacketTimeoutSeconds = item.optString(
+                        "tunnelPacketTimeoutSeconds",
+                        defaultProfile.tunnelPacketTimeoutSeconds,
+                    ),
+                    dispatcherIdlePollIntervalSeconds = item.optString(
+                        "dispatcherIdlePollIntervalSeconds",
+                        defaultProfile.dispatcherIdlePollIntervalSeconds,
+                    ),
+                    txChannelSize = item.optString("txChannelSize", defaultProfile.txChannelSize),
+                    rxChannelSize = item.optString("rxChannelSize", defaultProfile.rxChannelSize),
+                    resolverUdpConnectionPoolSize = item.optString(
+                        "resolverUdpConnectionPoolSize",
+                        defaultProfile.resolverUdpConnectionPoolSize,
+                    ),
+                    streamQueueInitialCapacity = item.optString(
+                        "streamQueueInitialCapacity",
+                        defaultProfile.streamQueueInitialCapacity,
+                    ),
+                    orphanQueueInitialCapacity = item.optString(
+                        "orphanQueueInitialCapacity",
+                        defaultProfile.orphanQueueInitialCapacity,
+                    ),
+                    dnsResponseFragmentStoreCapacity = item.optString(
+                        "dnsResponseFragmentStoreCapacity",
+                        defaultProfile.dnsResponseFragmentStoreCapacity,
+                    ),
+                    maxActiveStreams = item.optString("maxActiveStreams", defaultProfile.maxActiveStreams),
+                    localHandshakeTimeoutSeconds = item.optString(
+                        "localHandshakeTimeoutSeconds",
+                        defaultProfile.localHandshakeTimeoutSeconds,
+                    ),
+                    socksUdpAssociateReadTimeoutSeconds = item.optString(
+                        "socksUdpAssociateReadTimeoutSeconds",
+                        defaultProfile.socksUdpAssociateReadTimeoutSeconds,
+                    ),
+                    clientTerminalStreamRetentionSeconds = item.optString(
+                        "clientTerminalStreamRetentionSeconds",
+                        defaultProfile.clientTerminalStreamRetentionSeconds,
+                    ),
+                    clientCancelledSetupRetentionSeconds = item.optString(
+                        "clientCancelledSetupRetentionSeconds",
+                        defaultProfile.clientCancelledSetupRetentionSeconds,
+                    ),
+                    sessionInitRetryBaseSeconds = item.optString(
+                        "sessionInitRetryBaseSeconds",
+                        defaultProfile.sessionInitRetryBaseSeconds,
+                    ),
+                    sessionInitRetryStepSeconds = item.optString(
+                        "sessionInitRetryStepSeconds",
+                        defaultProfile.sessionInitRetryStepSeconds,
+                    ),
+                    sessionInitRetryLinearAfter = item.optString(
+                        "sessionInitRetryLinearAfter",
+                        defaultProfile.sessionInitRetryLinearAfter,
+                    ),
+                    sessionInitRetryMaxSeconds = item.optString(
+                        "sessionInitRetryMaxSeconds",
+                        defaultProfile.sessionInitRetryMaxSeconds,
+                    ),
+                    sessionInitBusyRetryIntervalSeconds = item.optString(
+                        "sessionInitBusyRetryIntervalSeconds",
+                        defaultProfile.sessionInitBusyRetryIntervalSeconds,
+                    ),
+                    localDnsEnabled = item.optBoolean("localDnsEnabled", defaultProfile.localDnsEnabled),
+                    localDnsPort = item.optString("localDnsPort", defaultProfile.localDnsPort),
+                    startupMode = item.optString("startupMode", defaultProfile.startupMode),
+                    pingWatchdogSeconds = item.optString(
+                        "pingWatchdogSeconds",
+                        defaultProfile.pingWatchdogSeconds,
+                    ),
+                    trafficWarmupEnabled = item.optBoolean(
+                        "trafficWarmupEnabled",
+                        defaultProfile.trafficWarmupEnabled,
+                    ),
+                    trafficWarmupProbeCount = item.optString(
+                        "trafficWarmupProbeCount",
+                        defaultProfile.trafficWarmupProbeCount,
+                    ),
+                    trafficKeepaliveIntervalSeconds = item.optString(
+                        "trafficKeepaliveIntervalSeconds",
+                        defaultProfile.trafficKeepaliveIntervalSeconds,
+                    ),
+                    logLevel = item.optString("logLevel", defaultProfile.logLevel),
+                )
+            }
+                .filter { it.id.isNotBlank() && it.id != AdvancedSettingsProfile.DefaultId }
+        }.getOrDefault(emptyList())
+    }
+
+    private fun encodeAdvancedProfiles(profiles: List<AdvancedSettingsProfile>): String {
+        val array = JSONArray()
+        profiles
+            .filter { it.id.isNotBlank() && it.id != AdvancedSettingsProfile.DefaultId }
+            .forEach { profile ->
+                array.put(
+                    JSONObject()
+                        .put("id", profile.id)
+                        .put("name", profile.name)
+                        .put("listenIp", profile.listenIp)
+                        .put("listenPort", profile.listenPort)
+                        .put("httpProxyEnabled", profile.httpProxyEnabled)
+                        .put("httpProxyPort", profile.httpProxyPort)
+                        .put("socks5Authentication", profile.socks5Authentication)
+                        .put("socksUsername", profile.socksUsername)
+                        .put("socksPassword", profile.socksPassword)
+                        .put("balancingStrategy", profile.balancingStrategy)
+                        .put("uploadDuplication", profile.uploadDuplication)
+                        .put("downloadDuplication", profile.downloadDuplication)
+                        .put("uploadCompression", profile.uploadCompression)
+                        .put("downloadCompression", profile.downloadCompression)
+                        .put("baseEncodeData", profile.baseEncodeData)
+                        .put("minUploadMtu", profile.minUploadMtu)
+                        .put("minDownloadMtu", profile.minDownloadMtu)
+                        .put("maxUploadMtu", profile.maxUploadMtu)
+                        .put("maxDownloadMtu", profile.maxDownloadMtu)
+                        .put("mtuTestRetriesResolvers", profile.mtuTestRetriesResolvers)
+                        .put("mtuTestTimeoutResolvers", profile.mtuTestTimeoutResolvers)
+                        .put("mtuTestParallelismResolvers", profile.mtuTestParallelismResolvers)
+                        .put("mtuTestRetriesLogs", profile.mtuTestRetriesLogs)
+                        .put("mtuTestTimeoutLogs", profile.mtuTestTimeoutLogs)
+                        .put("mtuTestParallelismLogs", profile.mtuTestParallelismLogs)
+                        .put("rxTxWorkers", profile.rxTxWorkers)
+                        .put("tunnelProcessWorkers", profile.tunnelProcessWorkers)
+                        .put("tunnelPacketTimeoutSeconds", profile.tunnelPacketTimeoutSeconds)
+                        .put("dispatcherIdlePollIntervalSeconds", profile.dispatcherIdlePollIntervalSeconds)
+                        .put("txChannelSize", profile.txChannelSize)
+                        .put("rxChannelSize", profile.rxChannelSize)
+                        .put("resolverUdpConnectionPoolSize", profile.resolverUdpConnectionPoolSize)
+                        .put("streamQueueInitialCapacity", profile.streamQueueInitialCapacity)
+                        .put("orphanQueueInitialCapacity", profile.orphanQueueInitialCapacity)
+                        .put("dnsResponseFragmentStoreCapacity", profile.dnsResponseFragmentStoreCapacity)
+                        .put("maxActiveStreams", profile.maxActiveStreams)
+                        .put("localHandshakeTimeoutSeconds", profile.localHandshakeTimeoutSeconds)
+                        .put("socksUdpAssociateReadTimeoutSeconds", profile.socksUdpAssociateReadTimeoutSeconds)
+                        .put("clientTerminalStreamRetentionSeconds", profile.clientTerminalStreamRetentionSeconds)
+                        .put("clientCancelledSetupRetentionSeconds", profile.clientCancelledSetupRetentionSeconds)
+                        .put("sessionInitRetryBaseSeconds", profile.sessionInitRetryBaseSeconds)
+                        .put("sessionInitRetryStepSeconds", profile.sessionInitRetryStepSeconds)
+                        .put("sessionInitRetryLinearAfter", profile.sessionInitRetryLinearAfter)
+                        .put("sessionInitRetryMaxSeconds", profile.sessionInitRetryMaxSeconds)
+                        .put("sessionInitBusyRetryIntervalSeconds", profile.sessionInitBusyRetryIntervalSeconds)
+                        .put("localDnsEnabled", profile.localDnsEnabled)
+                        .put("localDnsPort", profile.localDnsPort)
+                        .put("startupMode", profile.startupMode)
+                        .put("pingWatchdogSeconds", profile.pingWatchdogSeconds)
+                        .put("trafficWarmupEnabled", profile.trafficWarmupEnabled)
+                        .put("trafficWarmupProbeCount", profile.trafficWarmupProbeCount)
+                        .put("trafficKeepaliveIntervalSeconds", profile.trafficKeepaliveIntervalSeconds)
+                        .put("logLevel", profile.logLevel),
+                )
+            }
+        return array.toString()
+    }
+
     private fun decodePackageNames(raw: String?): List<String> {
         if (raw.isNullOrBlank()) {
             return emptyList()
@@ -391,6 +616,8 @@ class WhiteDnsSettingsStore(
         const val KeyConnectionProfiles = "connection_profiles"
         const val KeySelectedResolverProfileId = "selected_resolver_profile_id"
         const val KeyResolverProfiles = "resolver_profiles"
+        const val KeySelectedAdvancedProfileId = "selected_advanced_profile_id"
+        const val KeyAdvancedProfiles = "advanced_profiles"
         const val KeyServerMode = "server_mode"
         const val KeyCustomServerDomain = "custom_server_domain"
         const val KeyCustomServerEncryptionKey = "custom_server_encryption_key"

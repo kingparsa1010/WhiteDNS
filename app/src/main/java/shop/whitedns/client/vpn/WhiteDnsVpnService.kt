@@ -17,8 +17,6 @@ import android.system.OsConstants
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import java.net.Inet4Address
-import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.util.concurrent.atomic.AtomicReference
@@ -340,22 +338,15 @@ class WhiteDnsVpnService : VpnService() {
             } else {
                 null
             }
-            val dnsServer = selectVpnDnsServer(resolvedSettings.resolverEntries) ?: DefaultDnsServer
-
-            logInfo("Preparing Android VPN interface")
+            logInfo("Preparing Android VPN interface with virtual DNS")
             val tun = Builder()
                 .setSession("WhiteDNS")
                 .setMtu(VpnMtu)
-                .addAddress(TunIpv4Address, 32)
+                .addAddress(TunIpv4Address, TunIpv4PrefixLength)
+                .addDnsServer(TunDnsServer)
+                .addRoute(TunDnsServer, 32)
                 .addRoute("0.0.0.0", 0)
-                .addDnsServer(dnsServer)
                 .apply {
-                    runCatching {
-                        addAddress(TunIpv6Address, 128)
-                        addRoute("::", 0)
-                    }.onFailure { error ->
-                        logWarning("IPv6 full-device route was not enabled: ${error.message ?: error::class.java.simpleName}")
-                    }
                     configureSplitTunnelApplications(
                         splitTunnelMode = resolvedSettings.splitTunnelMode,
                         splitTunnelPackages = resolvedSettings.splitTunnelPackages,
@@ -496,33 +487,6 @@ class WhiteDnsVpnService : VpnService() {
             "::" -> "::1"
             else -> host
         }
-    }
-
-    private fun selectVpnDnsServer(resolvers: List<String>): String? {
-        return resolvers
-            .asSequence()
-            .mapNotNull(::extractResolverHost)
-            .mapNotNull { host ->
-                runCatching { InetAddress.getByName(host) }.getOrNull()
-            }
-            .filterIsInstance<Inet4Address>()
-            .firstOrNull()
-            ?.hostAddress
-    }
-
-    private fun extractResolverHost(resolver: String): String? {
-        val value = resolver.trim()
-        if (value.isEmpty()) {
-            return null
-        }
-        if (value.startsWith("[") && value.contains("]")) {
-            return value.substringAfter("[").substringBefore("]")
-        }
-        val colonCount = value.count { it == ':' }
-        if (colonCount == 1 && value.substringAfter(":").all(Char::isDigit)) {
-            return value.substringBefore(":")
-        }
-        return value
     }
 
     private fun Intent.serverProfileExtra(): StormDnsServerProfile? {
@@ -720,9 +684,9 @@ class WhiteDnsVpnService : VpnService() {
         private const val ExtraServerEncryptionKey = "shop.whitedns.client.vpn.extra.SERVER_ENCRYPTION_KEY"
         private const val ExtraServerEncryptionMethod = "shop.whitedns.client.vpn.extra.SERVER_ENCRYPTION_METHOD"
         private const val ExtraSettings = "shop.whitedns.client.vpn.extra.SETTINGS"
-        private const val DefaultDnsServer = "1.1.1.1"
-        const val TunIpv4Address = "10.111.0.2"
-        private const val TunIpv6Address = "fd42:4242:4242::2"
+        const val TunIpv4Address = "172.19.0.1"
+        private const val TunIpv4PrefixLength = 30
+        private const val TunDnsServer = "172.19.0.2"
         private const val VpnMtu = 1500
         private const val Tun2proxyStopGracePeriodMillis = 5_000L
         private const val PreviousRuntimeStopTimeoutMillis = 3_000L

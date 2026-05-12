@@ -1155,7 +1155,6 @@ class WhiteDnsViewModel(
         return profiles.fold(this) { message, profile ->
             message
                 .replace(profile.domain, "[server route]")
-                .replace(profile.encryptionKey, "[redacted key]")
         }
     }
 

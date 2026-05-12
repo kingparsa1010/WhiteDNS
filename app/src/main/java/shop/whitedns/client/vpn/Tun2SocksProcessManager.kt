@@ -43,7 +43,7 @@ class Tun2SocksProcessManager(
                     closeTunFileDescriptorOnDrop,
                     TunMtu.toChar(),
                     Tun2proxy.VERBOSITY_WARN,
-                    Tun2proxy.DNS_OVER_TCP,
+                    Tun2proxy.DNS_VIRTUAL,
                 )
             } catch (error: Throwable) {
                 runCatching {

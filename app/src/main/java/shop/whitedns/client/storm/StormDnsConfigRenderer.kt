@@ -1,10 +1,34 @@
 package shop.whitedns.client.storm
 
+import shop.whitedns.client.model.ConnectionProfile
 import shop.whitedns.client.model.StormDnsServerProfile
 import shop.whitedns.client.model.WhiteDnsSettings
+import shop.whitedns.client.model.normalizedResolverProfiles
 import shop.whitedns.client.model.resolve
+import shop.whitedns.client.model.runtimeConnectionSettings
 
 object StormDnsConfigRenderer {
+
+    fun renderClientToml(
+        connectionProfile: ConnectionProfile,
+        settings: WhiteDnsSettings,
+    ): String {
+        val resolverProfile = settings.normalizedResolverProfiles()
+            .firstOrNull { it.id == connectionProfile.resolverProfileId }
+        val exportSettings = settings.copy(
+            selectedConnectionProfileId = connectionProfile.id,
+            selectedResolverProfileId = resolverProfile?.id.orEmpty(),
+            resolverText = resolverProfile?.resolverText ?: settings.resolverText,
+            connectionMode = when (connectionProfile.connectionMode) {
+                "proxy", "vpn" -> connectionProfile.connectionMode
+                else -> settings.connectionMode
+            },
+        ).runtimeConnectionSettings()
+        return renderClientToml(
+            serverProfile = connectionProfile.toStormDnsServerProfile(),
+            settings = exportSettings,
+        )
+    }
 
     fun renderClientToml(
         serverProfile: StormDnsServerProfile,
@@ -80,5 +104,20 @@ object StormDnsConfigRenderer {
         return value
             .replace("\\", "\\\\")
             .replace("\"", "\\\"")
+    }
+
+    private fun ConnectionProfile.toStormDnsServerProfile(): StormDnsServerProfile {
+        val domain = customServerDomain.trim().trimEnd('.')
+        val encryptionKey = customServerEncryptionKey.trim()
+        if (domain.isBlank() || encryptionKey.isBlank()) {
+            throw IllegalArgumentException("Custom server domain and encryption key are required to export TOML")
+        }
+        return StormDnsServerProfile(
+            id = id.ifBlank { "custom" },
+            label = name.ifBlank { "Custom StormDNS Server" },
+            domain = domain,
+            encryptionKey = encryptionKey,
+            encryptionMethod = customServerEncryptionMethod.coerceIn(0, 5),
+        )
     }
 }

@@ -81,6 +81,10 @@ git submodule update --init --recursive
 make debug
 ```
 
+The debug APK uses package `shop.whitedns.client.debug` and the app label
+`WhiteDNS Debug`, so QA can install it next to the production app without
+uninstalling the original WhiteDNS build.
+
 If Go is installed outside your shell `PATH`, pass it explicitly:
 
 ```bash

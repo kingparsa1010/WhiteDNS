@@ -6,6 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -23,6 +24,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -57,7 +60,9 @@ import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Upload
+import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
 import androidx.compose.material.icons.rounded.DragHandle
@@ -79,6 +84,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,11 +93,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.zIndex
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -99,10 +107,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
@@ -113,6 +121,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import shop.whitedns.client.model.AdvancedSettingsProfile
 import shop.whitedns.client.model.Choice
 import shop.whitedns.client.model.ConnectionProfile
 import shop.whitedns.client.model.ConnectionProgressState
@@ -126,26 +135,32 @@ import shop.whitedns.client.model.WhiteDnsOptions
 import shop.whitedns.client.model.WhiteDnsSettings
 import shop.whitedns.client.model.WhiteDnsUiState
 import shop.whitedns.client.model.applyResolverProfileToSelectedConnection
-import shop.whitedns.client.model.clearSelectedResolverProfile
 import shop.whitedns.client.model.deleteConnectionProfile
 import shop.whitedns.client.model.deleteResolverProfile
 import shop.whitedns.client.model.exportAllStormDnsProfileLinks
 import shop.whitedns.client.model.exportStormDnsProfileLink
 import shop.whitedns.client.model.importStormDnsProfileLinks
+import shop.whitedns.client.model.matchesAdvancedProfile
 import shop.whitedns.client.model.moveConnectionProfileToIndex
 import shop.whitedns.client.model.moveResolverProfileToIndex
+import shop.whitedns.client.model.normalizedAdvancedProfiles
 import shop.whitedns.client.model.normalizedConnectionProfiles
 import shop.whitedns.client.model.normalizedResolverProfiles
 import shop.whitedns.client.model.resolve
 import shop.whitedns.client.model.resetAdvancedSettings
 import shop.whitedns.client.model.runtimeConnectionSettings
+import shop.whitedns.client.model.saveCurrentAdvancedProfileAs
+import shop.whitedns.client.model.saveSelectedAdvancedProfile
+import shop.whitedns.client.model.selectAdvancedProfile
 import shop.whitedns.client.model.selectConnectionProfile
+import shop.whitedns.client.model.selectedAdvancedProfile
 import shop.whitedns.client.model.selectedConnectionProfile
 import shop.whitedns.client.model.selectedResolverProfile
 import shop.whitedns.client.model.updateManualResolverText
 import shop.whitedns.client.model.upsertConnectionProfile
 import shop.whitedns.client.model.upsertResolverProfile
 import shop.whitedns.client.model.validateResolverText
+import shop.whitedns.client.storm.StormDnsConfigRenderer
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
@@ -161,16 +176,21 @@ fun WhiteDnsScreen(
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
     var selectedTab by rememberSaveable { mutableStateOf(WhiteDnsTab.CONNECT) }
+    var profileCreateRequest by rememberSaveable { mutableStateOf<ProfileCreateRequest?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(WhiteDnsPalette.Background),
+            .whiteDnsPageBackground(),
     ) {
         Box(modifier = Modifier.weight(1f)) {
             when (selectedTab) {
                 WhiteDnsTab.PROFILES -> ProfilesTabContent(
                     uiState = uiState,
+                    createRequest = profileCreateRequest,
+                    onCreateRequestConsumed = {
+                        profileCreateRequest = null
+                    },
                     onSettingsChange = onSettingsChange,
                 )
                 WhiteDnsTab.CONNECT -> ConnectTabContent(
@@ -178,6 +198,14 @@ fun WhiteDnsScreen(
                     onBatteryOptimizationClick = onBatteryOptimizationClick,
                     onNotificationPermissionClick = onNotificationPermissionClick,
                     onConnectClick = onConnectClick,
+                    onAddConnectionClick = {
+                        profileCreateRequest = ProfileCreateRequest.CONNECTION
+                        selectedTab = WhiteDnsTab.PROFILES
+                    },
+                    onAddResolverProfileClick = {
+                        profileCreateRequest = ProfileCreateRequest.RESOLVER
+                        selectedTab = WhiteDnsTab.PROFILES
+                    },
                     onSettingsChange = onSettingsChange,
                 )
                 WhiteDnsTab.LOGS -> LogsTabContent(uiState = uiState)
@@ -199,30 +227,66 @@ private enum class WhiteDnsTab(
     LOGS("Logs", Icons.Rounded.Link),
 }
 
+private enum class ProfileCreateRequest {
+    CONNECTION,
+    RESOLVER,
+}
+
+private fun Modifier.whiteDnsPageBackground(): Modifier {
+    return drawBehind {
+        drawRect(color = WhiteDnsPalette.Background)
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    WhiteDnsPalette.Accent.copy(alpha = 0.30f),
+                    Color(0xFF245D72).copy(alpha = 0.17f),
+                    Color(0xFF111420).copy(alpha = 0.08f),
+                    Color.Transparent,
+                ),
+                center = Offset(x = size.width, y = 0f),
+                radius = size.maxDimension * 1.08f,
+            ),
+        )
+    }
+}
+
 @Composable
 private fun ConnectTabContent(
     uiState: WhiteDnsUiState,
     onBatteryOptimizationClick: () -> Unit,
     onNotificationPermissionClick: () -> Unit,
     onConnectClick: () -> Unit,
+    onAddConnectionClick: () -> Unit,
+    onAddResolverProfileClick: () -> Unit,
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
     val settings = uiState.settings
-    var advancedOpen by rememberSaveable { mutableStateOf(false) }
     var showResolverRequiredMessage by rememberSaveable { mutableStateOf(false) }
+    var selectorSheetType by rememberSaveable { mutableStateOf<HomeSelectorType?>(null) }
+    var selectorSheetVisible by rememberSaveable { mutableStateOf(false) }
+    var advancedEditorVisible by rememberSaveable { mutableStateOf(false) }
+    var showAdvancedSaveAsDialog by rememberSaveable { mutableStateOf(false) }
+    var showConnectionTomlDialog by rememberSaveable { mutableStateOf(false) }
     val runtimeSettings = remember(settings) { settings.runtimeConnectionSettings() }
     val resolvedSettings = remember(runtimeSettings) { runtimeSettings.resolve() }
     val connectionProfiles = remember(settings) { settings.normalizedConnectionProfiles() }
     val selectedConnectionProfile = remember(settings) { settings.selectedConnectionProfile() }
     val resolverProfiles = remember(settings) { settings.normalizedResolverProfiles() }
+    val advancedProfiles = remember(settings) { settings.normalizedAdvancedProfiles() }
+    val selectedAdvancedProfile = remember(settings) { settings.selectedAdvancedProfile() }
+    val advancedProfileDirty = remember(settings, selectedAdvancedProfile) {
+        !settings.matchesAdvancedProfile(selectedAdvancedProfile)
+    }
+    val hasInitialServerProfile = remember(connectionProfiles) {
+        connectionProfiles.any { profile ->
+            profile.customServerDomain.isNotBlank() &&
+                profile.customServerEncryptionKey.isNotBlank()
+        }
+    }
+    val hasInitialResolverProfile = resolverProfiles.isNotEmpty()
+    val showInitialSetup = !hasInitialServerProfile || !hasInitialResolverProfile
     val selectedResolverProfile = remember(settings) { settings.selectedResolverProfile() }
     val resolverValidation = remember(settings.resolverText) { validateResolverText(settings.resolverText) }
-    val manualResolverMessage = manualResolverValidationMessage(
-        resolverText = settings.resolverText,
-        invalidEntries = resolverValidation.invalidEntries,
-        validResolverCount = resolverValidation.normalizedResolvers.size,
-    )
-    val manualResolverMessageIsError = manualResolverMessage != null && !resolverValidation.isValid
     val context = LocalContext.current
     val splitTunnelApps = remember(context.packageName) {
         loadSplitTunnelAppOptions(context)
@@ -230,14 +294,39 @@ private fun ConnectTabContent(
     val splitTunnelAppLabels = remember(splitTunnelApps) {
         splitTunnelApps.associate { it.packageName to it.label }
     }
-    val connectionProfileChoices = remember(connectionProfiles) {
+    val connectionSelectorItems = remember(connectionProfiles) {
         connectionProfiles.map { profile ->
-            Choice(profile.id, profile.name)
+            HomeSelectorItem(
+                id = profile.id,
+                title = profile.name,
+                detail = profile.customServerDomain.ifBlank { "Server route missing" },
+            )
         }
     }
-    val resolverProfileChoices = remember(resolverProfiles) {
-        listOf(Choice("", "Manual resolvers")) +
-            resolverProfiles.map { profile -> Choice(profile.id, profile.name) }
+    val resolverSelectorItems = remember(resolverProfiles) {
+        resolverProfiles.map { profile ->
+            HomeSelectorItem(
+                id = profile.id,
+                title = profile.name,
+                detail = resolverCountLabel(validateResolverText(profile.resolverText).normalizedResolvers.size),
+            )
+        }
+    }
+    val advancedSelectorItems = remember(advancedProfiles) {
+        advancedProfiles.map { profile ->
+            HomeSelectorItem(
+                id = profile.id,
+                title = profile.name,
+                detail = advancedProfileSummary(profile),
+            )
+        }
+    }
+    val resolverSelectorDetail = selectedResolverProfile?.resolverText?.let { resolverText ->
+        resolverCountLabel(validateResolverText(resolverText).normalizedResolvers.size)
+    } ?: if (resolverProfiles.isEmpty()) {
+        "No saved lists"
+    } else {
+        "Not selected"
     }
     val hasResolvers = resolverValidation.isValid
     val proxyIpAddress = displayProxyIpAddress(
@@ -258,23 +347,45 @@ private fun ConnectTabContent(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .statusBarsPadding()
-            .padding(bottom = 24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        HeaderCard()
+    fun openSelector(type: HomeSelectorType) {
+        if (type != HomeSelectorType.ADVANCED) {
+            advancedEditorVisible = false
+        }
+        selectorSheetType = type
+        selectorSheetVisible = true
+    }
 
+    fun closeSelector() {
+        advancedEditorVisible = false
+        selectorSheetVisible = false
+    }
+
+    BackHandler(enabled = advancedEditorVisible) {
+        advancedEditorVisible = false
+    }
+
+    BackHandler(enabled = selectorSheetVisible && !advancedEditorVisible) {
+        closeSelector()
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 420.dp)
-                .padding(horizontal = 20.dp),
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .padding(bottom = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            HeaderCard()
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp)
+                    .padding(horizontal = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
             AnimatedVisibility(
                 visible = showNotificationBanner,
                 enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
@@ -300,31 +411,14 @@ private fun ConnectTabContent(
                     if (!showNotificationBanner && !showBatteryBanner) 36.dp else 18.dp,
                 ),
             )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Bottom,
-            ) {
-                WhiteDnsDropdownField(
-                    modifier = Modifier.weight(1f),
-                    label = "Connection Profile",
-                    value = selectedConnectionProfile.id,
-                    options = connectionProfileChoices,
-                    enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
-                    onValueChange = { profileId ->
-                        showResolverRequiredMessage = false
-                        onSettingsChange(settings.selectConnectionProfile(profileId))
-                    },
-                )
                 ConnectionModeSegmentedControl(
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.fillMaxWidth(),
                     selectedMode = resolvedSettings.connectionMode,
                     enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
                     onModeChange = { connectionMode ->
                         onSettingsChange(settings.copy(connectionMode = connectionMode))
                     },
                 )
-            }
             AnimatedVisibility(
                 visible = resolvedSettings.connectionMode == "vpn",
                 enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(180)),
@@ -371,6 +465,42 @@ private fun ConnectTabContent(
                 },
             )
             AnimatedVisibility(
+                visible = uiState.connectionStatus != ConnectionStatus.CONNECTED,
+                enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(140)) + shrinkVertically(animationSpec = tween(140)),
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        HomeSelectorCard(
+                            label = "Connection",
+                            value = selectedConnectionProfile.name,
+                            detail = selectedConnectionProfile.customServerDomain.ifBlank { "Server route missing" },
+                            selected = true,
+                            enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
+                            onClick = { openSelector(HomeSelectorType.CONNECTION) },
+                        )
+                        HomeSelectorCard(
+                            label = "Resolver",
+                            value = selectedResolverProfile?.name ?: "Resolver Profile",
+                            detail = resolverSelectorDetail,
+                            selected = selectedResolverProfile != null,
+                            enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
+                            onClick = { openSelector(HomeSelectorType.RESOLVER) },
+                        )
+                        AdvancedProfileControls(
+                            selectedProfile = selectedAdvancedProfile,
+                            dirty = advancedProfileDirty,
+                            enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
+                            onSelectClick = { openSelector(HomeSelectorType.ADVANCED) },
+                        )
+                    }
+                }
+            }
+            AnimatedVisibility(
                 visible = uiState.connectionStatus == ConnectionStatus.CONNECTED,
                 enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(180)),
                 exit = fadeOut(animationSpec = tween(120)) + shrinkVertically(animationSpec = tween(120)),
@@ -404,7 +534,31 @@ private fun ConnectTabContent(
                     ),
                 )
             }
-            Spacer(modifier = Modifier.height(24.dp))
+            AnimatedVisibility(
+                visible = showInitialSetup,
+                enter = fadeIn(animationSpec = tween(180)) + expandVertically(animationSpec = tween(180)),
+                exit = fadeOut(animationSpec = tween(140)) + shrinkVertically(animationSpec = tween(140)),
+            ) {
+                Column {
+                    Spacer(modifier = Modifier.height(18.dp))
+                    ConnectionSetupCard(
+                        selectedConnectionProfile = selectedConnectionProfile,
+                        selectedResolverProfile = selectedResolverProfile,
+                        resolverCount = resolverValidation.normalizedResolvers.size,
+                        resolverIssue = resolverValidation.invalidEntries.firstOrNull()?.let { invalidEntry ->
+                            "Invalid resolver IP: $invalidEntry"
+                        } ?: if (resolverValidation.normalizedResolvers.isEmpty()) {
+                            "No resolvers configured"
+                        } else {
+                            null
+                        },
+                        actionsEnabled = uiState.connectionStatus != ConnectionStatus.CONNECTING,
+                        onAddConnectionClick = onAddConnectionClick,
+                        onAddResolverProfileClick = onAddResolverProfileClick,
+                    )
+                    Spacer(modifier = Modifier.height(18.dp))
+                }
+            }
 
             AnimatedVisibility(
                 visible = uiState.connectionStatus == ConnectionStatus.CONNECTED,
@@ -425,6 +579,9 @@ private fun ConnectTabContent(
                         .padding(top = 20.dp),
                 ) {
                     ConnectionInfoCard(
+                        connectionProfileName = selectedConnectionProfile.name,
+                        resolverProfileName = selectedResolverProfile?.name ?: "Manual resolvers",
+                        settingProfileName = selectedAdvancedProfile.displayName(dirty = advancedProfileDirty),
                         listenAddress = proxyAddress,
                         httpProxyAddress = httpProxyAddress,
                         connectionMode = WhiteDnsOptions.connectionModeLabel(resolvedSettings.connectionMode),
@@ -438,326 +595,126 @@ private fun ConnectTabContent(
                         splitTunnelMode = resolvedSettings.splitTunnelMode,
                         splitTunnelPackages = resolvedSettings.splitTunnelPackages,
                         splitTunnelAppLabels = splitTunnelAppLabels,
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            InfoCard(title = "RESOLVERS") {
-                WhiteDnsDropdownField(
-                    label = "Resolver Profile",
-                    value = selectedResolverProfile?.id.orEmpty(),
-                    options = resolverProfileChoices,
-                    enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
-                    onValueChange = { profileId ->
-                        showResolverRequiredMessage = false
-                        onSettingsChange(
-                            if (profileId.isBlank()) {
-                                settings.clearSelectedResolverProfile()
-                            } else {
-                                settings.applyResolverProfileToSelectedConnection(profileId)
-                            },
-                        )
-                    },
-                )
-                Spacer(modifier = Modifier.height(10.dp))
-                WhiteDnsTextField(
-                    label = "RESOLVERS",
-                    value = settings.resolverText,
-                    onValueChange = {
-                        showResolverRequiredMessage = false
-                        onSettingsChange(settings.updateManualResolverText(it))
-                    },
-                    placeholder = "1.1.1.1, 8.8.8.8 or one per line",
-                    singleLine = false,
-                    minLines = 6,
-                    maxLines = 10,
-                    onFocusChange = { focused ->
-                        if (!focused) {
-                            normalizeManualResolverInput()
-                        }
-                    },
-                )
-                manualResolverMessage?.let { message ->
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = message,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 10.sp,
-                            color = if (manualResolverMessageIsError) WhiteDnsPalette.Error else WhiteDnsPalette.Muted,
-                        ),
-                    )
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    ResolverActionButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        label = "CLEAR",
-                        onClick = {
-                            showResolverRequiredMessage = false
-                            onSettingsChange(settings.updateManualResolverText(""))
+                        canDownloadToml = selectedConnectionProfile.customServerDomain.isNotBlank() &&
+                            selectedConnectionProfile.customServerEncryptionKey.isNotBlank(),
+                        onDownloadToml = {
+                            showConnectionTomlDialog = true
                         },
                     )
                 }
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = "Save reusable resolver lists in Profiles > Resolver Profile.",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 11.sp,
-                        color = WhiteDnsPalette.Description,
-                        fontWeight = FontWeight.Medium,
-                    ),
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            SectionCard(
-                title = "ADVANCED SETTINGS",
-                expanded = advancedOpen,
-                onToggle = { advancedOpen = !advancedOpen },
-            ) {
-                GroupLabel("MTU")
-                MtuSettingsGroup(
-                    settings = settings,
-                    onSettingsChange = onSettingsChange,
-                )
-
-                SectionDivider()
-                GroupLabel("Runtime Workers, Queues, and Timers")
-                RuntimeWorkersSettingsGroup(
-                    settings = settings,
-                    onSettingsChange = onSettingsChange,
-                )
-
-                SectionDivider()
-                if (resolvedSettings.connectionMode == "proxy") {
-                    GroupLabel("Local Proxy")
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WhiteDnsTextField(
-                            modifier = Modifier.weight(1f),
-                            label = "Listen IP",
-                            value = settings.listenIp,
-                            onValueChange = { onSettingsChange(settings.copy(listenIp = it)) },
-                            placeholder = "127.0.0.1",
-                        )
-                        WhiteDnsTextField(
-                            modifier = Modifier.weight(1f),
-                            label = "Listen Port",
-                            value = settings.listenPort,
-                            onValueChange = { onSettingsChange(settings.copy(listenPort = it.filter(Char::isDigit))) },
-                            placeholder = "10886",
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                capitalization = KeyboardCapitalization.None,
-                            ),
-                        )
-                    }
-
-                    ToggleRow(
-                        label = "HTTP Proxy",
-                        enabled = settings.httpProxyEnabled,
-                        onToggle = {
-                            onSettingsChange(settings.copy(httpProxyEnabled = !settings.httpProxyEnabled))
-                        },
-                    )
-                    AnimatedVisibility(
-                        visible = settings.httpProxyEnabled,
-                        enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
-                        exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
-                    ) {
-                        WhiteDnsTextField(
-                            label = "HTTP Port",
-                            value = settings.httpProxyPort,
-                            onValueChange = { onSettingsChange(settings.copy(httpProxyPort = it.filter(Char::isDigit))) },
-                            placeholder = "10887",
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                capitalization = KeyboardCapitalization.None,
-                            ),
-                        )
-                    }
-
-                    ToggleRow(
-                        label = "SOCKS5 Authentication",
-                        enabled = settings.socks5Authentication,
-                        onToggle = {
-                            onSettingsChange(settings.copy(socks5Authentication = !settings.socks5Authentication))
-                        },
-                    )
-
-                    AnimatedVisibility(
-                        visible = settings.socks5Authentication,
-                        enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
-                        exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
-                    ) {
-                        Column {
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                WhiteDnsTextField(
-                                    modifier = Modifier.weight(1f),
-                                    label = "Username",
-                                    value = settings.socksUsername,
-                                    onValueChange = { onSettingsChange(settings.copy(socksUsername = it)) },
-                                    placeholder = "master_dns_vpn",
-                                )
-                                WhiteDnsTextField(
-                                    modifier = Modifier.weight(1f),
-                                    label = "Password",
-                                    value = settings.socksPassword,
-                                    onValueChange = { onSettingsChange(settings.copy(socksPassword = it)) },
-                                    placeholder = "master_dns_vpn",
-                                    visualTransformation = PasswordVisualTransformation(),
-                                )
-                            }
-                        }
-                    }
-
-                    SectionDivider()
-                }
-
-                GroupLabel("Network Tuning")
-
-                WhiteDnsDropdownField(
-                    label = "Balancing Strategy",
-                    value = settings.balancingStrategy,
-                    options = WhiteDnsOptions.balancingStrategies,
-                    onValueChange = { onSettingsChange(settings.copy(balancingStrategy = it)) },
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WhiteDnsTextField(
-                        modifier = Modifier.weight(1f),
-                        label = "Upload Dup",
-                        value = settings.uploadDuplication,
-                        onValueChange = {
-                            onSettingsChange(settings.copy(uploadDuplication = it.filter(Char::isDigit)))
-                        },
-                        placeholder = "3",
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            capitalization = KeyboardCapitalization.None,
-                        ),
-                    )
-                    WhiteDnsTextField(
-                        modifier = Modifier.weight(1f),
-                        label = "Download Dup",
-                        value = settings.downloadDuplication,
-                        onValueChange = {
-                            onSettingsChange(settings.copy(downloadDuplication = it.filter(Char::isDigit)))
-                        },
-                        placeholder = "7",
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            capitalization = KeyboardCapitalization.None,
-                        ),
-                    )
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WhiteDnsDropdownField(
-                        modifier = Modifier.weight(1f),
-                        label = "Upload Compress",
-                        value = settings.uploadCompression,
-                        options = WhiteDnsOptions.compressionTypes,
-                        onValueChange = { onSettingsChange(settings.copy(uploadCompression = it)) },
-                    )
-                    WhiteDnsDropdownField(
-                        modifier = Modifier.weight(1f),
-                        label = "Download Compress",
-                        value = settings.downloadCompression,
-                        options = WhiteDnsOptions.compressionTypes,
-                        onValueChange = { onSettingsChange(settings.copy(downloadCompression = it)) },
-                    )
-                }
-                ToggleRow(
-                    label = "Base Encode Data",
-                    enabled = settings.baseEncodeData,
-                    onToggle = {
-                        onSettingsChange(settings.copy(baseEncodeData = !settings.baseEncodeData))
-                    },
-                )
-
-                SectionDivider()
-                GroupLabel("Reliability")
-
-                WhiteDnsTextField(
-                    label = "Ping Watchdog (s)",
-                    value = settings.pingWatchdogSeconds,
-                    onValueChange = {
-                        onSettingsChange(settings.copy(pingWatchdogSeconds = it.filter(Char::isDigit)))
-                    },
-                    placeholder = "300",
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        capitalization = KeyboardCapitalization.None,
-                    ),
-                )
-                ToggleRow(
-                    label = "Traffic Warmup",
-                    enabled = settings.trafficWarmupEnabled,
-                    onToggle = {
-                        onSettingsChange(settings.copy(trafficWarmupEnabled = !settings.trafficWarmupEnabled))
-                    },
-                )
-                AnimatedVisibility(
-                    visible = settings.trafficWarmupEnabled,
-                    enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
-                    exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        WhiteDnsTextField(
-                            modifier = Modifier.weight(1f),
-                            label = "Warmup Probes",
-                            value = settings.trafficWarmupProbeCount,
-                            onValueChange = {
-                                onSettingsChange(settings.copy(trafficWarmupProbeCount = it.filter(Char::isDigit)))
-                            },
-                            placeholder = "4",
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                capitalization = KeyboardCapitalization.None,
-                            ),
-                        )
-                        WhiteDnsTextField(
-                            modifier = Modifier.weight(1f),
-                            label = "Keepalive (s)",
-                            value = settings.trafficKeepaliveIntervalSeconds,
-                            onValueChange = {
-                                onSettingsChange(
-                                    settings.copy(trafficKeepaliveIntervalSeconds = it.filter(Char::isDigit)),
-                                )
-                            },
-                            placeholder = "5",
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                capitalization = KeyboardCapitalization.None,
-                            ),
-                        )
-                    }
-                }
-                WhiteDnsDropdownField(
-                    label = "Log Level",
-                    value = settings.logLevel,
-                    options = WhiteDnsOptions.logLevels,
-                    onValueChange = { onSettingsChange(settings.copy(logLevel = it)) },
-                )
-
-                SectionDivider()
-                ResolverActionButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    label = "RESET ADVANCED SETTINGS",
-                    emphasized = true,
-                    enabled = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
-                    onClick = {
-                        onSettingsChange(settings.resetAdvancedSettings())
-                    },
-                )
             }
 
             Spacer(modifier = Modifier.height(24.dp))
             FooterLink()
+        }
+        }
+
+        selectorSheetType?.let { activeSelector ->
+            HomeSelectorSheet(
+                visible = selectorSheetVisible,
+                title = when (activeSelector) {
+                    HomeSelectorType.CONNECTION -> "Connection Profiles"
+                    HomeSelectorType.RESOLVER -> "Resolver Profiles"
+                    HomeSelectorType.ADVANCED -> "Advanced Profiles"
+                },
+                searchPlaceholder = when (activeSelector) {
+                    HomeSelectorType.CONNECTION -> "Search connections"
+                    HomeSelectorType.RESOLVER -> "Search resolvers"
+                    HomeSelectorType.ADVANCED -> "Search advanced profiles"
+                },
+                items = when (activeSelector) {
+                    HomeSelectorType.CONNECTION -> connectionSelectorItems
+                    HomeSelectorType.RESOLVER -> resolverSelectorItems
+                    HomeSelectorType.ADVANCED -> advancedSelectorItems
+                },
+                selectedId = when (activeSelector) {
+                    HomeSelectorType.CONNECTION -> selectedConnectionProfile.id
+                    HomeSelectorType.RESOLVER -> selectedResolverProfile?.id
+                    HomeSelectorType.ADVANCED -> selectedAdvancedProfile.id
+                },
+                emptyMessage = when (activeSelector) {
+                    HomeSelectorType.CONNECTION -> "No connection profiles found."
+                    HomeSelectorType.RESOLVER -> "No resolver profiles found."
+                    HomeSelectorType.ADVANCED -> "No advanced profiles found."
+                },
+                onDismiss = { closeSelector() },
+                onSelect = { itemId ->
+                    showResolverRequiredMessage = false
+                    when (activeSelector) {
+                        HomeSelectorType.CONNECTION -> {
+                            onSettingsChange(settings.selectConnectionProfile(itemId))
+                        }
+                        HomeSelectorType.RESOLVER -> {
+                            onSettingsChange(settings.applyResolverProfileToSelectedConnection(itemId))
+                        }
+                        HomeSelectorType.ADVANCED -> {
+                            onSettingsChange(settings.selectAdvancedProfile(itemId))
+                        }
+                    }
+                    closeSelector()
+                },
+                onEdit = if (activeSelector == HomeSelectorType.ADVANCED) {
+                    { itemId ->
+                        showResolverRequiredMessage = false
+                        onSettingsChange(settings.selectAdvancedProfile(itemId))
+                        advancedEditorVisible = true
+                    }
+                } else {
+                    null
+                },
+            )
+        }
+
+        AdvancedSettingsEditorSheet(
+            visible = selectorSheetVisible && advancedEditorVisible,
+            settings = settings,
+            selectedProfile = selectedAdvancedProfile,
+            dirty = advancedProfileDirty,
+            showProxySettings = resolvedSettings.connectionMode == "proxy",
+            canEdit = uiState.connectionStatus == ConnectionStatus.DISCONNECTED,
+            onBack = { advancedEditorVisible = false },
+            onSettingsChange = onSettingsChange,
+            onSaveClick = {
+                onSettingsChange(settings.saveSelectedAdvancedProfile())
+            },
+            onSaveAsClick = {
+                showAdvancedSaveAsDialog = true
+            },
+            onResetClick = {
+                onSettingsChange(settings.resetAdvancedSettings())
+            },
+        )
+
+        if (showAdvancedSaveAsDialog) {
+            AdvancedProfileSaveAsDialog(
+                initialName = advancedSaveAsInitialName(selectedAdvancedProfile),
+                onDismiss = { showAdvancedSaveAsDialog = false },
+                onSave = { profileName ->
+                    onSettingsChange(settings.saveCurrentAdvancedProfileAs(profileName))
+                    showAdvancedSaveAsDialog = false
+                },
+            )
+        }
+
+        if (showConnectionTomlDialog) {
+            ConnectionProfileExportDialog(
+                title = "DOWNLOAD TOML",
+                fieldLabel = "client_config.toml",
+                placeholder = "client_config.toml",
+                showQr = false,
+                linkResult = remember(settings, selectedConnectionProfile, showConnectionTomlDialog) {
+                    runCatching {
+                        StormDnsConfigRenderer.renderClientToml(
+                            connectionProfile = selectedConnectionProfile,
+                            settings = settings,
+                        )
+                    }
+                },
+                onDismiss = { showConnectionTomlDialog = false },
+                onShare = { toml ->
+                    shareClientConfigToml(context, toml)
+                },
+            )
         }
     }
 }
@@ -765,9 +722,30 @@ private fun ConnectTabContent(
 @Composable
 private fun ProfilesTabContent(
     uiState: WhiteDnsUiState,
+    createRequest: ProfileCreateRequest?,
+    onCreateRequestConsumed: () -> Unit,
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
     var selectedProfileTab by rememberSaveable { mutableStateOf(ProfileTab.CONNECTION) }
+    var connectionCreateRequestId by rememberSaveable { mutableStateOf(0) }
+    var resolverCreateRequestId by rememberSaveable { mutableStateOf(0) }
+
+    LaunchedEffect(createRequest) {
+        when (createRequest) {
+            ProfileCreateRequest.CONNECTION -> {
+                selectedProfileTab = ProfileTab.CONNECTION
+                connectionCreateRequestId += 1
+                onCreateRequestConsumed()
+            }
+            ProfileCreateRequest.RESOLVER -> {
+                selectedProfileTab = ProfileTab.RESOLVER
+                resolverCreateRequestId += 1
+                onCreateRequestConsumed()
+            }
+            null -> Unit
+        }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -800,11 +778,13 @@ private fun ProfilesTabContent(
                         settings = uiState.settings,
                         activeConnectionProfileId = uiState.activeConnectionProfileId,
                         connectionStatus = uiState.connectionStatus,
+                        openCreateRequestId = connectionCreateRequestId,
                         onSettingsChange = onSettingsChange,
                     )
                     ProfileTab.RESOLVER -> ResolverProfilesSettings(
                         settings = uiState.settings,
                         connectionStatus = uiState.connectionStatus,
+                        openCreateRequestId = resolverCreateRequestId,
                         onSettingsChange = onSettingsChange,
                     )
                 }
@@ -965,16 +945,10 @@ private fun FooterLink() {
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "https://t.me/whitedns",
+            text = WhiteDnsTelegramUrl,
             modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .clickable {
-                    val intent = Intent(
-                        Intent.ACTION_VIEW,
-                        Uri.parse("https://t.me/whitedns"),
-                    )
-                    context.startActivity(intent)
-                }
+                .clickable { openWhiteDnsTelegram(context) }
                 .padding(horizontal = 8.dp, vertical = 3.dp),
             style = MaterialTheme.typography.bodyMedium.copy(
                 fontSize = 9.sp,
@@ -1051,11 +1025,940 @@ private fun ConnectionModeSegmentedControl(
     }
 }
 
+private enum class HomeSelectorType {
+    CONNECTION,
+    RESOLVER,
+    ADVANCED,
+}
+
+private data class HomeSelectorItem(
+    val id: String,
+    val title: String,
+    val detail: String,
+)
+
+@Composable
+private fun HomeSelectorCard(
+    label: String,
+    value: String,
+    detail: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val borderColor = when {
+        !enabled -> WhiteDnsPalette.Divider
+        selected -> WhiteDnsPalette.Accent.copy(alpha = 0.28f)
+        else -> WhiteDnsPalette.Border
+    }
+    val textColor = if (enabled) WhiteDnsPalette.Ink else WhiteDnsPalette.Disabled
+    val detailColor = when {
+        !enabled -> WhiteDnsPalette.Disabled
+        selected -> WhiteDnsPalette.AccentText
+        else -> WhiteDnsPalette.Muted
+    }
+
+    Column(modifier = modifier) {
+        FieldLabel(label)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (enabled) WhiteDnsPalette.Surface else WhiteDnsPalette.SurfaceAlt)
+                .border(1.5.dp, borderColor, RoundedCornerShape(12.dp))
+                .clickable(enabled = enabled, onClick = onClick)
+                .padding(horizontal = 11.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = value,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 12.sp,
+                        color = textColor,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = detail,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 10.sp,
+                        color = detailColor,
+                        fontWeight = FontWeight.Medium,
+                    ),
+                )
+            }
+            Icon(
+                imageVector = Icons.Rounded.KeyboardArrowDown,
+                contentDescription = null,
+                tint = if (enabled) WhiteDnsPalette.Muted else WhiteDnsPalette.Disabled,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AdvancedProfileControls(
+    selectedProfile: AdvancedSettingsProfile,
+    dirty: Boolean,
+    enabled: Boolean,
+    onSelectClick: () -> Unit,
+) {
+    HomeSelectorCard(
+        label = "Setting",
+        value = selectedProfile.name,
+        detail = if (dirty) "Unsaved changes" else advancedProfileSummary(selectedProfile),
+        selected = !dirty,
+        enabled = enabled,
+        onClick = onSelectClick,
+    )
+}
+
+@Composable
+private fun AdvancedProfileActionRow(
+    selectedProfile: AdvancedSettingsProfile,
+    dirty: Boolean,
+    enabled: Boolean,
+    onSaveClick: () -> Unit,
+    onSaveAsClick: () -> Unit,
+) {
+    val canSave = enabled && selectedProfile.id != AdvancedSettingsProfile.DefaultId && dirty
+    val canSaveAs = enabled && (dirty || selectedProfile.id != AdvancedSettingsProfile.DefaultId)
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ResolverActionButton(
+            modifier = Modifier.weight(1f),
+            label = "SAVE",
+            emphasized = canSave,
+            enabled = canSave,
+            onClick = onSaveClick,
+        )
+        ResolverActionButton(
+            modifier = Modifier.weight(1f),
+            label = "SAVE AS",
+            emphasized = dirty && selectedProfile.id == AdvancedSettingsProfile.DefaultId,
+            enabled = canSaveAs,
+            onClick = onSaveAsClick,
+        )
+    }
+}
+
+@Composable
+private fun AdvancedProfileSaveAsDialog(
+    initialName: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit,
+) {
+    var name by rememberSaveable(initialName) { mutableStateOf(initialName) }
+    val canSave = name.trim().isNotEmpty()
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(22.dp))
+                .background(WhiteDnsPalette.Surface)
+                .border(1.5.dp, WhiteDnsPalette.Border, RoundedCornerShape(22.dp))
+                .padding(18.dp),
+        ) {
+            Text(
+                text = "SAVE ADVANCED PROFILE",
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 14.sp,
+                    color = WhiteDnsPalette.Ink,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.1.sp,
+                ),
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            WhiteDnsTextField(
+                label = "Name",
+                value = name,
+                onValueChange = { name = it },
+                placeholder = "Fast tunnel",
+            )
+            Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                CompactActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = "CANCEL",
+                    emphasized = false,
+                    enabled = true,
+                    onClick = onDismiss,
+                )
+                CompactActionButton(
+                    modifier = Modifier.weight(1f),
+                    label = "SAVE AS",
+                    emphasized = true,
+                    enabled = canSave,
+                    onClick = {
+                        onSave(name.trim())
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedSettingsEditorSheet(
+    visible: Boolean,
+    settings: WhiteDnsSettings,
+    selectedProfile: AdvancedSettingsProfile,
+    dirty: Boolean,
+    showProxySettings: Boolean,
+    canEdit: Boolean,
+    onBack: () -> Unit,
+    onSettingsChange: (WhiteDnsSettings) -> Unit,
+    onSaveClick: () -> Unit,
+    onSaveAsClick: () -> Unit,
+    onResetClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(
+            animationSpec = tween(260, easing = FastOutSlowInEasing),
+            initialOffsetX = { -it },
+        ) + fadeIn(animationSpec = tween(180)),
+        exit = slideOutHorizontally(
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
+            targetOffsetX = { it },
+        ) + fadeOut(animationSpec = tween(160)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .whiteDnsPageBackground()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileIconButton(
+                        icon = Icons.AutoMirrored.Rounded.ArrowBack,
+                        contentDescription = "Back to advanced profiles",
+                        emphasized = false,
+                        enabled = true,
+                        onClick = onBack,
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = selectedProfile.name,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                color = WhiteDnsPalette.Ink,
+                            ),
+                        )
+                        Text(
+                            text = if (dirty) "Unsaved changes" else advancedProfileSummary(selectedProfile),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 10.sp,
+                                color = if (dirty) WhiteDnsPalette.WarningText else WhiteDnsPalette.Muted,
+                                fontWeight = FontWeight.Medium,
+                            ),
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(14.dp))
+                AdvancedProfileActionRow(
+                    selectedProfile = selectedProfile,
+                    dirty = dirty,
+                    enabled = canEdit,
+                    onSaveClick = onSaveClick,
+                    onSaveAsClick = onSaveAsClick,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    InfoCard(title = "EDIT ADVANCED SETTINGS", compact = true) {
+                        AdvancedSettingsFields(
+                            settings = settings,
+                            showProxySettings = showProxySettings,
+                            onSettingsChange = onSettingsChange,
+                        )
+                        SectionDivider()
+                        ResolverActionButton(
+                            modifier = Modifier.fillMaxWidth(),
+                            label = "RESET ADVANCED SETTINGS",
+                            emphasized = true,
+                            enabled = canEdit,
+                            onClick = onResetClick,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AdvancedSettingsFields(
+    settings: WhiteDnsSettings,
+    showProxySettings: Boolean,
+    onSettingsChange: (WhiteDnsSettings) -> Unit,
+) {
+    GroupLabel("MTU")
+    MtuSettingsGroup(
+        settings = settings,
+        onSettingsChange = onSettingsChange,
+    )
+
+    SectionDivider()
+    GroupLabel("Runtime Workers, Queues, and Timers")
+    RuntimeWorkersSettingsGroup(
+        settings = settings,
+        onSettingsChange = onSettingsChange,
+    )
+
+    SectionDivider()
+    if (showProxySettings) {
+        GroupLabel("Local Proxy")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WhiteDnsTextField(
+                modifier = Modifier.weight(1f),
+                label = "Listen IP",
+                value = settings.listenIp,
+                onValueChange = { onSettingsChange(settings.copy(listenIp = it)) },
+                placeholder = "127.0.0.1",
+            )
+            WhiteDnsTextField(
+                modifier = Modifier.weight(1f),
+                label = "Listen Port",
+                value = settings.listenPort,
+                onValueChange = { onSettingsChange(settings.copy(listenPort = it.filter(Char::isDigit))) },
+                placeholder = "10886",
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    capitalization = KeyboardCapitalization.None,
+                ),
+            )
+        }
+
+        ToggleRow(
+            label = "HTTP Proxy",
+            enabled = settings.httpProxyEnabled,
+            onToggle = {
+                onSettingsChange(settings.copy(httpProxyEnabled = !settings.httpProxyEnabled))
+            },
+        )
+        AnimatedVisibility(
+            visible = settings.httpProxyEnabled,
+            enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
+            exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
+        ) {
+            WhiteDnsTextField(
+                label = "HTTP Port",
+                value = settings.httpProxyPort,
+                onValueChange = { onSettingsChange(settings.copy(httpProxyPort = it.filter(Char::isDigit))) },
+                placeholder = "10887",
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    capitalization = KeyboardCapitalization.None,
+                ),
+            )
+        }
+
+        ToggleRow(
+            label = "SOCKS5 Authentication",
+            enabled = settings.socks5Authentication,
+            onToggle = {
+                onSettingsChange(settings.copy(socks5Authentication = !settings.socks5Authentication))
+            },
+        )
+
+        AnimatedVisibility(
+            visible = settings.socks5Authentication,
+            enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
+            exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
+        ) {
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    WhiteDnsTextField(
+                        modifier = Modifier.weight(1f),
+                        label = "Username",
+                        value = settings.socksUsername,
+                        onValueChange = { onSettingsChange(settings.copy(socksUsername = it)) },
+                        placeholder = "master_dns_vpn",
+                    )
+                    WhiteDnsTextField(
+                        modifier = Modifier.weight(1f),
+                        label = "Password",
+                        value = settings.socksPassword,
+                        onValueChange = { onSettingsChange(settings.copy(socksPassword = it)) },
+                        placeholder = "master_dns_vpn",
+                        visualTransformation = PasswordVisualTransformation(),
+                    )
+                }
+            }
+        }
+
+        SectionDivider()
+    }
+
+    GroupLabel("Network Tuning")
+
+    WhiteDnsDropdownField(
+        label = "Balancing Strategy",
+        value = settings.balancingStrategy,
+        options = WhiteDnsOptions.balancingStrategies,
+        onValueChange = { onSettingsChange(settings.copy(balancingStrategy = it)) },
+    )
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WhiteDnsTextField(
+            modifier = Modifier.weight(1f),
+            label = "Upload Dup",
+            value = settings.uploadDuplication,
+            onValueChange = {
+                onSettingsChange(settings.copy(uploadDuplication = it.filter(Char::isDigit)))
+            },
+            placeholder = "3",
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                capitalization = KeyboardCapitalization.None,
+            ),
+        )
+        WhiteDnsTextField(
+            modifier = Modifier.weight(1f),
+            label = "Download Dup",
+            value = settings.downloadDuplication,
+            onValueChange = {
+                onSettingsChange(settings.copy(downloadDuplication = it.filter(Char::isDigit)))
+            },
+            placeholder = "7",
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                capitalization = KeyboardCapitalization.None,
+            ),
+        )
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        WhiteDnsDropdownField(
+            modifier = Modifier.weight(1f),
+            label = "Upload Compress",
+            value = settings.uploadCompression,
+            options = WhiteDnsOptions.compressionTypes,
+            onValueChange = { onSettingsChange(settings.copy(uploadCompression = it)) },
+        )
+        WhiteDnsDropdownField(
+            modifier = Modifier.weight(1f),
+            label = "Download Compress",
+            value = settings.downloadCompression,
+            options = WhiteDnsOptions.compressionTypes,
+            onValueChange = { onSettingsChange(settings.copy(downloadCompression = it)) },
+        )
+    }
+    ToggleRow(
+        label = "Base Encode Data",
+        enabled = settings.baseEncodeData,
+        onToggle = {
+            onSettingsChange(settings.copy(baseEncodeData = !settings.baseEncodeData))
+        },
+    )
+
+    SectionDivider()
+    GroupLabel("Reliability")
+
+    WhiteDnsTextField(
+        label = "Ping Watchdog (s)",
+        value = settings.pingWatchdogSeconds,
+        onValueChange = {
+            onSettingsChange(settings.copy(pingWatchdogSeconds = it.filter(Char::isDigit)))
+        },
+        placeholder = "300",
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            capitalization = KeyboardCapitalization.None,
+        ),
+    )
+    ToggleRow(
+        label = "Traffic Warmup",
+        enabled = settings.trafficWarmupEnabled,
+        onToggle = {
+            onSettingsChange(settings.copy(trafficWarmupEnabled = !settings.trafficWarmupEnabled))
+        },
+    )
+    AnimatedVisibility(
+        visible = settings.trafficWarmupEnabled,
+        enter = fadeIn(animationSpec = tween(220)) + expandVertically(animationSpec = tween(220)),
+        exit = fadeOut(animationSpec = tween(160)) + shrinkVertically(animationSpec = tween(160)),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            WhiteDnsTextField(
+                modifier = Modifier.weight(1f),
+                label = "Warmup Probes",
+                value = settings.trafficWarmupProbeCount,
+                onValueChange = {
+                    onSettingsChange(settings.copy(trafficWarmupProbeCount = it.filter(Char::isDigit)))
+                },
+                placeholder = "4",
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    capitalization = KeyboardCapitalization.None,
+                ),
+            )
+            WhiteDnsTextField(
+                modifier = Modifier.weight(1f),
+                label = "Keepalive (s)",
+                value = settings.trafficKeepaliveIntervalSeconds,
+                onValueChange = {
+                    onSettingsChange(
+                        settings.copy(trafficKeepaliveIntervalSeconds = it.filter(Char::isDigit)),
+                    )
+                },
+                placeholder = "5",
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    capitalization = KeyboardCapitalization.None,
+                ),
+            )
+        }
+    }
+    WhiteDnsDropdownField(
+        label = "Log Level",
+        value = settings.logLevel,
+        options = WhiteDnsOptions.logLevels,
+        onValueChange = { onSettingsChange(settings.copy(logLevel = it)) },
+    )
+}
+
+private fun advancedProfileSummary(profile: AdvancedSettingsProfile): String {
+    return "MTU ${profile.minUploadMtu}-${profile.maxUploadMtu}/${profile.minDownloadMtu}-${profile.maxDownloadMtu}, ${profile.logLevel}"
+}
+
+private fun advancedSaveAsInitialName(profile: AdvancedSettingsProfile): String {
+    return if (profile.id == AdvancedSettingsProfile.DefaultId) {
+        "Custom Advanced"
+    } else {
+        "${profile.name} Copy"
+    }
+}
+
+private fun AdvancedSettingsProfile.displayName(dirty: Boolean): String {
+    return if (dirty) {
+        "$name (modified)"
+    } else {
+        name
+    }
+}
+
+@Composable
+private fun HomeSelectorSheet(
+    visible: Boolean,
+    title: String,
+    searchPlaceholder: String,
+    items: List<HomeSelectorItem>,
+    selectedId: String?,
+    emptyMessage: String,
+    onDismiss: () -> Unit,
+    onSelect: (String) -> Unit,
+    onEdit: ((String) -> Unit)? = null,
+) {
+    var query by rememberSaveable(title) { mutableStateOf("") }
+    val normalizedQuery = query.trim()
+    val filteredItems = remember(items, normalizedQuery) {
+        if (normalizedQuery.isBlank()) {
+            items
+        } else {
+            val lowerQuery = normalizedQuery.lowercase(Locale.getDefault())
+            items.filter { item ->
+                item.title.lowercase(Locale.getDefault()).contains(lowerQuery) ||
+                    item.detail.lowercase(Locale.getDefault()).contains(lowerQuery)
+            }
+        }
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInHorizontally(
+            animationSpec = tween(260, easing = FastOutSlowInEasing),
+            initialOffsetX = { -it },
+        ) + fadeIn(animationSpec = tween(180)),
+        exit = slideOutHorizontally(
+            animationSpec = tween(220, easing = FastOutSlowInEasing),
+            targetOffsetX = { it },
+        ) + fadeOut(animationSpec = tween(160)),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .whiteDnsPageBackground()
+                .statusBarsPadding()
+                .padding(horizontal = 20.dp, vertical = 22.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .widthIn(max = 420.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    ProfileIconButton(
+                        icon = Icons.Rounded.Close,
+                        contentDescription = "Close selector",
+                        emphasized = false,
+                        enabled = true,
+                        onClick = onDismiss,
+                    )
+                    Text(
+                        modifier = Modifier.weight(1f),
+                        text = title,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleLarge.copy(
+                            color = WhiteDnsPalette.Ink,
+                        ),
+                    )
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                WhiteDnsTextField(
+                    label = "Search",
+                    value = query,
+                    onValueChange = { query = it },
+                    placeholder = searchPlaceholder,
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (filteredItems.isEmpty()) {
+                        Text(
+                            text = emptyMessage,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 11.sp,
+                                color = WhiteDnsPalette.Muted,
+                            ),
+                        )
+                    } else {
+                        filteredItems.forEach { item ->
+                            HomeSelectorSheetRow(
+                                item = item,
+                                selected = item.id == selectedId,
+                                onClick = { onSelect(item.id) },
+                                onEdit = onEdit?.let { edit -> { edit(item.id) } },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HomeSelectorSheetRow(
+    item: HomeSelectorItem,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onEdit: (() -> Unit)? = null,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) WhiteDnsPalette.AccentSurface else WhiteDnsPalette.Surface)
+            .border(
+                1.5.dp,
+                if (selected) WhiteDnsPalette.Accent.copy(alpha = 0.28f) else WhiteDnsPalette.Border,
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 11.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = item.title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    color = WhiteDnsPalette.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(
+                text = item.detail,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 10.sp,
+                    color = if (selected) WhiteDnsPalette.AccentText else WhiteDnsPalette.Muted,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+        onEdit?.let { edit ->
+            ProfileIconButton(
+                icon = Icons.Rounded.Edit,
+                contentDescription = "Edit ${item.title}",
+                emphasized = false,
+                enabled = true,
+                onClick = edit,
+            )
+        }
+        if (selected) {
+            Icon(
+                imageVector = Icons.Rounded.Check,
+                contentDescription = "Selected",
+                tint = WhiteDnsPalette.AccentText,
+                modifier = Modifier.size(18.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun ConnectionSetupCard(
+    selectedConnectionProfile: ConnectionProfile,
+    selectedResolverProfile: ResolverProfile?,
+    resolverCount: Int,
+    resolverIssue: String?,
+    actionsEnabled: Boolean,
+    onAddConnectionClick: () -> Unit,
+    onAddResolverProfileClick: () -> Unit,
+) {
+    val serverRoute = selectedConnectionProfile.customServerDomain.ifBlank { "Server route missing" }
+    val connectionIssue = when {
+        selectedConnectionProfile.customServerDomain.isBlank() &&
+            selectedConnectionProfile.customServerEncryptionKey.isBlank() -> "Server route and key missing"
+        selectedConnectionProfile.customServerDomain.isBlank() -> "Server route missing"
+        selectedConnectionProfile.customServerEncryptionKey.isBlank() -> "Encryption key missing"
+        else -> null
+    }
+    val resolverSource = selectedResolverProfile?.name ?: "Manual resolvers"
+    val resolverDetail = resolverIssue ?: resolverCountLabel(resolverCount)
+
+    InfoCard(title = "SETUP", compact = true) {
+        SetupInfoRow(
+            icon = if (connectionIssue == null) Icons.Rounded.Link else Icons.Rounded.WarningAmber,
+            label = "Connection",
+            value = selectedConnectionProfile.name.ifBlank { "Connection" },
+            detail = connectionIssue ?: serverRoute,
+            color = if (connectionIssue == null) WhiteDnsPalette.AccentText else WhiteDnsPalette.WarningText,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.5.dp)
+                .background(WhiteDnsPalette.Divider),
+        )
+        SetupInfoRow(
+            icon = if (resolverIssue == null) Icons.Rounded.Check else Icons.Rounded.WarningAmber,
+            label = "Resolvers",
+            value = resolverSource,
+            detail = resolverDetail,
+            color = if (resolverIssue == null) WhiteDnsPalette.Success else WhiteDnsPalette.WarningText,
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+        SetupActionButton(
+            label = "Add Connection",
+            supportingText = "Server domain and key",
+            icon = Icons.Rounded.Add,
+            emphasized = true,
+            enabled = actionsEnabled,
+            onClick = onAddConnectionClick,
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        SetupActionButton(
+            label = "Add Resolver Profile",
+            supportingText = "DNS resolver list",
+            icon = Icons.Rounded.Add,
+            emphasized = false,
+            enabled = actionsEnabled,
+            onClick = onAddResolverProfileClick,
+        )
+    }
+}
+
+@Composable
+private fun SetupInfoRow(
+    icon: ImageVector,
+    label: String,
+    value: String,
+    detail: String,
+    color: Color,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 9.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .background(color.copy(alpha = 0.14f))
+                .border(1.5.dp, color.copy(alpha = 0.22f), RoundedCornerShape(9.dp)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = color,
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 9.sp,
+                    color = WhiteDnsPalette.Muted,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 13.sp,
+                    color = WhiteDnsPalette.Ink,
+                    fontWeight = FontWeight.SemiBold,
+                ),
+            )
+            Spacer(modifier = Modifier.height(1.dp))
+            Text(
+                text = detail,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 10.sp,
+                    color = color,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupActionButton(
+    label: String,
+    supportingText: String,
+    icon: ImageVector,
+    emphasized: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+) {
+    val background = when {
+        !enabled -> WhiteDnsPalette.SurfaceAlt
+        emphasized -> WhiteDnsPalette.Accent
+        else -> WhiteDnsPalette.SurfaceAlt
+    }
+    val border = when {
+        !enabled -> WhiteDnsPalette.Divider
+        emphasized -> WhiteDnsPalette.AccentPressed
+        else -> WhiteDnsPalette.Border
+    }
+    val foreground = when {
+        !enabled -> WhiteDnsPalette.Disabled
+        emphasized -> WhiteDnsPalette.OnAccent
+        else -> WhiteDnsPalette.Ink
+    }
+    val secondary = when {
+        !enabled -> WhiteDnsPalette.Disabled
+        emphasized -> WhiteDnsPalette.OnAccent.copy(alpha = 0.78f)
+        else -> WhiteDnsPalette.Muted
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(background)
+            .border(1.5.dp, border, RoundedCornerShape(11.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = foreground,
+            modifier = Modifier.size(18.dp),
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 12.sp,
+                    color = foreground,
+                    fontWeight = FontWeight.Bold,
+                ),
+            )
+            Text(
+                text = supportingText,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    fontSize = 10.sp,
+                    color = secondary,
+                    fontWeight = FontWeight.Medium,
+                ),
+            )
+        }
+    }
+}
+
+private fun resolverCountLabel(count: Int): String {
+    return "$count resolver${if (count == 1) "" else "s"} configured"
+}
+
 @Composable
 private fun ConnectionProfilesSettings(
     settings: WhiteDnsSettings,
     activeConnectionProfileId: String?,
     connectionStatus: ConnectionStatus,
+    openCreateRequestId: Int,
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
     val profiles = settings.normalizedConnectionProfiles()
@@ -1103,6 +2006,12 @@ private fun ConnectionProfilesSettings(
         clearDragState()
         if (commit && profileId != null && targetIndex != null && canManageProfiles) {
             onSettingsChange(settings.moveConnectionProfileToIndex(profileId, targetIndex))
+        }
+    }
+
+    LaunchedEffect(openCreateRequestId) {
+        if (openCreateRequestId > 0 && canManageProfiles) {
+            showCreateDialog = true
         }
     }
 
@@ -1304,6 +2213,7 @@ private fun ConnectionProfilesSettings(
 private fun ResolverProfilesSettings(
     settings: WhiteDnsSettings,
     connectionStatus: ConnectionStatus,
+    openCreateRequestId: Int,
     onSettingsChange: (WhiteDnsSettings) -> Unit,
 ) {
     val profiles = settings.normalizedResolverProfiles()
@@ -1346,6 +2256,12 @@ private fun ResolverProfilesSettings(
         clearDragState()
         if (commit && profileId != null && targetIndex != null && canChangeProfiles) {
             onSettingsChange(settings.moveResolverProfileToIndex(profileId, targetIndex))
+        }
+    }
+
+    LaunchedEffect(openCreateRequestId) {
+        if (openCreateRequestId > 0 && canChangeProfiles) {
+            showCreateDialog = true
         }
     }
 
@@ -1799,6 +2715,8 @@ private fun ConnectionProfileExportDialog(
     linkResult: Result<String>,
     onDismiss: () -> Unit,
     onShare: (String) -> Unit,
+    placeholder: String = "stormdns://...",
+    showQr: Boolean = true,
 ) {
     val clipboardManager = LocalClipboardManager.current
 
@@ -1823,7 +2741,7 @@ private fun ConnectionProfileExportDialog(
             Spacer(modifier = Modifier.height(14.dp))
             val link = linkResult.getOrNull()
             if (link != null) {
-                if (!link.contains('\n')) {
+                if (showQr && !link.contains('\n')) {
                     ProfileQrPreview(link = link)
                     Spacer(modifier = Modifier.height(12.dp))
                 }
@@ -1831,7 +2749,7 @@ private fun ConnectionProfileExportDialog(
                     label = fieldLabel,
                     value = link,
                     onValueChange = {},
-                    placeholder = "stormdns://...",
+                    placeholder = placeholder,
                     singleLine = false,
                     minLines = if (link.contains('\n')) 7 else 5,
                     maxLines = 12,
@@ -1997,7 +2915,6 @@ private fun ConnectionProfileDialog(
                 value = encryptionKey,
                 onValueChange = { encryptionKey = it.trim() },
                 placeholder = "32-character key",
-                visualTransformation = PasswordVisualTransformation(),
             )
             WhiteDnsDropdownField(
                 label = "Encryption Method",
@@ -2732,6 +3649,7 @@ private fun RuntimeWorkersSettingsGroup(
 
 @Composable
 private fun HeaderCard() {
+    val context = LocalContext.current
     var showDonationDialog by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
@@ -2750,7 +3668,8 @@ private fun HeaderCard() {
                     .size(34.dp)
                     .clip(RoundedCornerShape(9.dp))
                     .background(WhiteDnsPalette.SurfaceAlt)
-                    .border(1.5.dp, WhiteDnsPalette.Border, RoundedCornerShape(9.dp)),
+                    .border(1.5.dp, WhiteDnsPalette.Border, RoundedCornerShape(9.dp))
+                    .clickable { openWhiteDnsTelegram(context) },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -2781,7 +3700,7 @@ private fun HeaderCard() {
                     .padding(horizontal = 10.dp, vertical = 4.dp),
             ) {
                 Text(
-                    text = "v1.1.0",
+                    text = "v1.2.0",
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontSize = 10.sp,
                         color = WhiteDnsPalette.Muted,
@@ -2812,6 +3731,14 @@ private fun HeaderCard() {
     if (showDonationDialog) {
         DonationDialog(onDismiss = { showDonationDialog = false })
     }
+}
+
+private fun openWhiteDnsTelegram(context: Context) {
+    val intent = Intent(
+        Intent.ACTION_VIEW,
+        Uri.parse(WhiteDnsTelegramUrl),
+    )
+    context.startActivity(intent)
 }
 
 @Composable
@@ -3344,7 +4271,7 @@ private fun ConnectButton(
         targetValue = when (status) {
             ConnectionStatus.DISCONNECTED -> if (enabled) WhiteDnsPalette.Accent else WhiteDnsPalette.Disabled
             ConnectionStatus.CONNECTING -> WhiteDnsPalette.AccentPressed
-            ConnectionStatus.CONNECTED -> WhiteDnsPalette.Success
+            ConnectionStatus.CONNECTED -> WhiteDnsPalette.WarningText
         },
         animationSpec = tween(400),
         label = "connectIconColor",
@@ -3382,15 +4309,15 @@ private fun ConnectButton(
         animationSpec = tween(300),
         label = "connectProgressFraction",
     )
-    val circleSize = 220.dp
-    val outerRingSize = 280.dp
+    val circleSize = 156.dp
+    val outerRingSize = 198.dp
     val label = when (status) {
         ConnectionStatus.DISCONNECTED -> "CONNECT"
         ConnectionStatus.CONNECTING -> "CONNECTING"
         ConnectionStatus.CONNECTED -> "STOP"
     }
     val labelColor = when (status) {
-        ConnectionStatus.CONNECTED -> WhiteDnsPalette.Success
+        ConnectionStatus.CONNECTED -> WhiteDnsPalette.WarningText
         ConnectionStatus.DISCONNECTED -> if (enabled) WhiteDnsPalette.Accent else WhiteDnsPalette.Disabled
         else -> WhiteDnsPalette.AccentPressed
     }
@@ -3419,7 +4346,7 @@ private fun ConnectButton(
                 )
             }
 
-            Canvas(modifier = Modifier.size(circleSize + 18.dp)) {
+            Canvas(modifier = Modifier.size(circleSize + 14.dp)) {
                 val strokeWidth = 5.dp.toPx()
                 val arcSize = Size(
                     width = size.width - strokeWidth,
@@ -3507,29 +4434,27 @@ private fun ConnectButton(
                         },
                         contentDescription = label,
                         tint = iconColor,
-                        modifier = Modifier.size(if (status == ConnectionStatus.CONNECTED) 44.dp else 48.dp),
+                        modifier = Modifier.size(if (status == ConnectionStatus.CONNECTED) 30.dp else 34.dp),
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = label,
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 13.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = labelColor,
-                            letterSpacing = 2.sp,
                         ),
                     )
                     if (status == ConnectionStatus.CONNECTING) {
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(5.dp))
                         Text(
                             text = progressState.label,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 10.sp,
+                                fontSize = 9.sp,
                                 fontWeight = FontWeight.Medium,
                                 color = WhiteDnsPalette.Muted,
-                                letterSpacing = 0.4.sp,
                             ),
                         )
                         Spacer(modifier = Modifier.height(2.dp))
@@ -3537,10 +4462,9 @@ private fun ConnectButton(
                             text = "${progressState.percent.coerceIn(0, 99)}%",
                             maxLines = 1,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 11.sp,
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = WhiteDnsPalette.Accent,
-                                letterSpacing = 0.8.sp,
                             ),
                         )
                     }
@@ -3914,6 +4838,9 @@ private fun SpeedIndicator(
 
 @Composable
 private fun ConnectionInfoCard(
+    connectionProfileName: String,
+    resolverProfileName: String,
+    settingProfileName: String,
     listenAddress: String,
     httpProxyAddress: String,
     connectionMode: String,
@@ -3927,6 +4854,8 @@ private fun ConnectionInfoCard(
     splitTunnelMode: String,
     splitTunnelPackages: List<String>,
     splitTunnelAppLabels: Map<String, String>,
+    canDownloadToml: Boolean,
+    onDownloadToml: () -> Unit,
 ) {
     InfoCard(title = "CONNECTION INFO") {
         InfoRow(label = "Mode", value = connectionMode)
@@ -3961,6 +4890,18 @@ private fun ConnectionInfoCard(
                     value = stats.connectedApps.toString(),
                 ),
             ),
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        InfoRow(label = "Connection Profile", value = connectionProfileName)
+        InfoRow(label = "Resolver Profile", value = resolverProfileName)
+        InfoRow(label = "Setting Profile", value = settingProfileName)
+        Spacer(modifier = Modifier.height(10.dp))
+        ResolverActionButton(
+            modifier = Modifier.fillMaxWidth(),
+            label = "DOWNLOAD TOML",
+            emphasized = false,
+            enabled = canDownloadToml,
+            onClick = onDownloadToml,
         )
     }
 }
@@ -4273,6 +5214,15 @@ private fun shareProfileLink(context: Context, link: String) {
     context.startActivity(Intent.createChooser(intent, "Export WhiteDNS profile"))
 }
 
+private fun shareClientConfigToml(context: Context, toml: String) {
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(Intent.EXTRA_SUBJECT, "client_config.toml")
+        putExtra(Intent.EXTRA_TEXT, toml)
+    }
+    context.startActivity(Intent.createChooser(intent, "Export client_config.toml"))
+}
+
 private fun buildDiagnosticsText(
     context: Context,
     uiState: WhiteDnsUiState,
@@ -4295,6 +5245,7 @@ private fun buildDiagnosticsText(
         appendLine("Mode: ${WhiteDnsOptions.connectionModeLabel(resolvedSettings.connectionMode)}")
         appendLine("Profile: ${selectedProfile.name.ifBlank { selectedProfile.id }}")
         appendLine("Server: [redacted]")
+        appendLine("Encryption key: ${selectedProfile.customServerEncryptionKey.ifBlank { "not configured" }}")
         appendLine("Resolver profile: ${resolverProfile?.name ?: "Manual resolvers"}")
         appendLine("Resolvers: ${resolvedSettings.resolverEntries.size}")
         appendLine("Split tunnel: ${WhiteDnsOptions.splitTunnelModeLabel(resolvedSettings.splitTunnelMode)}")
@@ -4328,10 +5279,7 @@ private fun String.redactDiagnosticSecrets(profile: ConnectionProfile): String {
     if (profile.customServerDomain.isNotBlank()) {
         redacted = redacted.replace(profile.customServerDomain, "[server route]")
     }
-    if (profile.customServerEncryptionKey.isNotBlank()) {
-        redacted = redacted.replace(profile.customServerEncryptionKey, "[redacted key]")
-    }
-    return redacted.replace(Regex("""(?i)(password|pass|key|secret)\s*[:=]\s*\S+"""), "\$1=[redacted]")
+    return redacted.replace(Regex("""(?i)(password|pass|secret)\s*[:=]\s*\S+"""), "\$1=[redacted]")
 }
 
 private fun readResolverTextFromUri(context: Context, uri: Uri): Result<String> {
@@ -4370,19 +5318,6 @@ private fun resolverValidationMessage(
     }
 }
 
-private fun manualResolverValidationMessage(
-    resolverText: String,
-    invalidEntries: List<String>,
-    validResolverCount: Int,
-): String? {
-    return when {
-        resolverText.isBlank() -> null
-        invalidEntries.isNotEmpty() -> "Invalid resolver IP: ${invalidEntries.first()}"
-        validResolverCount == 0 -> "Enter at least one valid resolver IP."
-        else -> "$validResolverCount valid resolver${if (validResolverCount == 1) "" else "s"}."
-    }
-}
-
 private val ResolverImportMimeTypes = arrayOf(
     "text/*",
     "application/json",
@@ -4390,6 +5325,7 @@ private val ResolverImportMimeTypes = arrayOf(
 )
 
 private const val QrBitmapSizePx = 768
+private const val WhiteDnsTelegramUrl = "https://t.me/whitedns"
 
 private data class DonationWallet(
     val label: String,

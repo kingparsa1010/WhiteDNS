@@ -20,6 +20,42 @@ class WhiteDnsModelsTest {
     }
 
     @Test
+    fun runtimeConnectionSettingsEnableTunneledDnsForProxyMode() {
+        val runtimeSettings = WhiteDnsSettings(
+            connectionMode = "proxy",
+            localDnsEnabled = false,
+            localDnsPort = "53",
+        ).runtimeConnectionSettings()
+        val resolvedSettings = runtimeSettings.resolve()
+
+        assertEquals("proxy", resolvedSettings.connectionMode)
+        assertEquals(true, resolvedSettings.localDnsEnabled)
+        assertEquals(WhiteDnsRuntimeProxy.LocalDnsPortInt, resolvedSettings.localDnsPort)
+    }
+
+    @Test
+    fun runtimeConnectionSettingsKeepFullVpnOnVirtualTunDnsPath() {
+        val runtimeSettings = WhiteDnsSettings(
+            connectionMode = "vpn",
+            listenIp = "0.0.0.0",
+            listenPort = "12345",
+            httpProxyEnabled = true,
+            socks5Authentication = true,
+            localDnsEnabled = true,
+            localDnsPort = "53",
+        ).runtimeConnectionSettings()
+        val resolvedSettings = runtimeSettings.resolve()
+
+        assertEquals("vpn", resolvedSettings.connectionMode)
+        assertEquals(WhiteDnsRuntimeProxy.ListenIp, resolvedSettings.listenIp)
+        assertEquals(WhiteDnsRuntimeProxy.ListenPortInt, resolvedSettings.listenPort)
+        assertEquals(false, resolvedSettings.httpProxyEnabled)
+        assertEquals(false, resolvedSettings.socks5Authentication)
+        assertEquals(false, resolvedSettings.localDnsEnabled)
+        assertEquals(WhiteDnsRuntimeProxy.LocalDnsPortInt, resolvedSettings.localDnsPort)
+    }
+
+    @Test
     fun syncSelectedConnectionProfileFieldsUsesSelectedResolverProfileText() {
         val resolverProfile = ResolverProfile(
             id = "resolver-main",
@@ -218,6 +254,53 @@ class WhiteDnsModelsTest {
             listOf("1.1.1.1", "8.8.8.8", "9.9.9.9:5353"),
             updatedSettings.resolve().resolverEntries,
         )
+    }
+
+    @Test
+    fun saveSelectedAdvancedProfileDoesNotPersistDefaultProfile() {
+        val settings = WhiteDnsSettings(uploadDuplication = "9")
+
+        val updatedSettings = settings.saveSelectedAdvancedProfile()
+
+        assertEquals(AdvancedSettingsProfile.DefaultId, updatedSettings.selectedAdvancedProfileId)
+        assertEquals("9", updatedSettings.uploadDuplication)
+        assertTrue(updatedSettings.advancedProfiles.isEmpty())
+    }
+
+    @Test
+    fun saveCurrentAdvancedProfileAsPersistsCustomProfileAndCanReturnToDefault() {
+        val savedSettings = WhiteDnsSettings(
+            uploadDuplication = "9",
+            logLevel = "DEBUG",
+        ).saveCurrentAdvancedProfileAs("Fast Tunnel")
+        val customProfileId = savedSettings.selectedAdvancedProfileId
+
+        assertEquals(1, savedSettings.advancedProfiles.size)
+        assertEquals("Fast Tunnel", savedSettings.selectedAdvancedProfile().name)
+        assertEquals("9", savedSettings.selectedAdvancedProfile().uploadDuplication)
+        assertEquals("DEBUG", savedSettings.selectedAdvancedProfile().logLevel)
+
+        val defaultSettings = savedSettings.selectAdvancedProfile(AdvancedSettingsProfile.DefaultId)
+
+        assertEquals(AdvancedSettingsProfile.DefaultId, defaultSettings.selectedAdvancedProfileId)
+        assertEquals("3", defaultSettings.uploadDuplication)
+        assertEquals("WARN", defaultSettings.logLevel)
+        assertEquals(customProfileId, defaultSettings.advancedProfiles.single().id)
+    }
+
+    @Test
+    fun saveSelectedAdvancedProfileUpdatesCustomProfileInPlace() {
+        val savedSettings = WhiteDnsSettings(
+            uploadDuplication = "4",
+        ).saveCurrentAdvancedProfileAs("Fast Tunnel")
+
+        val updatedSettings = savedSettings
+            .copy(uploadDuplication = "6")
+            .saveSelectedAdvancedProfile()
+
+        assertEquals(savedSettings.selectedAdvancedProfileId, updatedSettings.selectedAdvancedProfileId)
+        assertEquals("Fast Tunnel", updatedSettings.selectedAdvancedProfile().name)
+        assertEquals("6", updatedSettings.selectedAdvancedProfile().uploadDuplication)
     }
 
     @Test

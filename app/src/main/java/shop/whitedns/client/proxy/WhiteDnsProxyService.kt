@@ -148,6 +148,9 @@ class WhiteDnsProxyService : Service() {
                     )
                     logInfo("Using custom StormDNS server")
                     logInfo("Starting SOCKS listener on ${resolvedSettings.listenIp}:${resolvedSettings.listenPort}")
+                    if (resolvedSettings.localDnsEnabled) {
+                        logInfo("Starting tunneled DNS listener on 127.0.0.1:${resolvedSettings.localDnsPort}")
+                    }
                     startStormDns(serverProfile, settings, resolvedSettings)
                     startedOnce = true
                     restartDelayMillis = RestartInitialDelayMillis

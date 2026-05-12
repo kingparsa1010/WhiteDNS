@@ -68,6 +68,138 @@ data class ResolverProfile(
     }
 }
 
+data class AdvancedSettingsProfile(
+    val id: String,
+    val name: String,
+    val listenIp: String,
+    val listenPort: String,
+    val httpProxyEnabled: Boolean,
+    val httpProxyPort: String,
+    val socks5Authentication: Boolean,
+    val socksUsername: String,
+    val socksPassword: String,
+    val balancingStrategy: Int,
+    val uploadDuplication: String,
+    val downloadDuplication: String,
+    val uploadCompression: Int,
+    val downloadCompression: Int,
+    val baseEncodeData: Boolean,
+    val minUploadMtu: String,
+    val minDownloadMtu: String,
+    val maxUploadMtu: String,
+    val maxDownloadMtu: String,
+    val mtuTestRetriesResolvers: String,
+    val mtuTestTimeoutResolvers: String,
+    val mtuTestParallelismResolvers: String,
+    val mtuTestRetriesLogs: String,
+    val mtuTestTimeoutLogs: String,
+    val mtuTestParallelismLogs: String,
+    val rxTxWorkers: String,
+    val tunnelProcessWorkers: String,
+    val tunnelPacketTimeoutSeconds: String,
+    val dispatcherIdlePollIntervalSeconds: String,
+    val txChannelSize: String,
+    val rxChannelSize: String,
+    val resolverUdpConnectionPoolSize: String,
+    val streamQueueInitialCapacity: String,
+    val orphanQueueInitialCapacity: String,
+    val dnsResponseFragmentStoreCapacity: String,
+    val maxActiveStreams: String,
+    val localHandshakeTimeoutSeconds: String,
+    val socksUdpAssociateReadTimeoutSeconds: String,
+    val clientTerminalStreamRetentionSeconds: String,
+    val clientCancelledSetupRetentionSeconds: String,
+    val sessionInitRetryBaseSeconds: String,
+    val sessionInitRetryStepSeconds: String,
+    val sessionInitRetryLinearAfter: String,
+    val sessionInitRetryMaxSeconds: String,
+    val sessionInitBusyRetryIntervalSeconds: String,
+    val localDnsEnabled: Boolean,
+    val localDnsPort: String,
+    val startupMode: String,
+    val pingWatchdogSeconds: String,
+    val trafficWarmupEnabled: Boolean,
+    val trafficWarmupProbeCount: String,
+    val trafficKeepaliveIntervalSeconds: String,
+    val logLevel: String,
+) : Serializable {
+    companion object {
+        const val DefaultId = "advanced-default"
+
+        fun defaultProfile(): AdvancedSettingsProfile {
+            return fromSettings(
+                settings = WhiteDnsSettings(),
+                id = DefaultId,
+                name = "Default",
+            )
+        }
+
+        fun newId(): String = "advanced-${System.currentTimeMillis()}"
+
+        fun fromSettings(
+            settings: WhiteDnsSettings,
+            id: String = "",
+            name: String = "Advanced Settings",
+        ): AdvancedSettingsProfile {
+            return AdvancedSettingsProfile(
+                id = id,
+                name = name,
+                listenIp = settings.listenIp,
+                listenPort = settings.listenPort,
+                httpProxyEnabled = settings.httpProxyEnabled,
+                httpProxyPort = settings.httpProxyPort,
+                socks5Authentication = settings.socks5Authentication,
+                socksUsername = settings.socksUsername,
+                socksPassword = settings.socksPassword,
+                balancingStrategy = settings.balancingStrategy,
+                uploadDuplication = settings.uploadDuplication,
+                downloadDuplication = settings.downloadDuplication,
+                uploadCompression = settings.uploadCompression,
+                downloadCompression = settings.downloadCompression,
+                baseEncodeData = settings.baseEncodeData,
+                minUploadMtu = settings.minUploadMtu,
+                minDownloadMtu = settings.minDownloadMtu,
+                maxUploadMtu = settings.maxUploadMtu,
+                maxDownloadMtu = settings.maxDownloadMtu,
+                mtuTestRetriesResolvers = settings.mtuTestRetriesResolvers,
+                mtuTestTimeoutResolvers = settings.mtuTestTimeoutResolvers,
+                mtuTestParallelismResolvers = settings.mtuTestParallelismResolvers,
+                mtuTestRetriesLogs = settings.mtuTestRetriesLogs,
+                mtuTestTimeoutLogs = settings.mtuTestTimeoutLogs,
+                mtuTestParallelismLogs = settings.mtuTestParallelismLogs,
+                rxTxWorkers = settings.rxTxWorkers,
+                tunnelProcessWorkers = settings.tunnelProcessWorkers,
+                tunnelPacketTimeoutSeconds = settings.tunnelPacketTimeoutSeconds,
+                dispatcherIdlePollIntervalSeconds = settings.dispatcherIdlePollIntervalSeconds,
+                txChannelSize = settings.txChannelSize,
+                rxChannelSize = settings.rxChannelSize,
+                resolverUdpConnectionPoolSize = settings.resolverUdpConnectionPoolSize,
+                streamQueueInitialCapacity = settings.streamQueueInitialCapacity,
+                orphanQueueInitialCapacity = settings.orphanQueueInitialCapacity,
+                dnsResponseFragmentStoreCapacity = settings.dnsResponseFragmentStoreCapacity,
+                maxActiveStreams = settings.maxActiveStreams,
+                localHandshakeTimeoutSeconds = settings.localHandshakeTimeoutSeconds,
+                socksUdpAssociateReadTimeoutSeconds = settings.socksUdpAssociateReadTimeoutSeconds,
+                clientTerminalStreamRetentionSeconds = settings.clientTerminalStreamRetentionSeconds,
+                clientCancelledSetupRetentionSeconds = settings.clientCancelledSetupRetentionSeconds,
+                sessionInitRetryBaseSeconds = settings.sessionInitRetryBaseSeconds,
+                sessionInitRetryStepSeconds = settings.sessionInitRetryStepSeconds,
+                sessionInitRetryLinearAfter = settings.sessionInitRetryLinearAfter,
+                sessionInitRetryMaxSeconds = settings.sessionInitRetryMaxSeconds,
+                sessionInitBusyRetryIntervalSeconds = settings.sessionInitBusyRetryIntervalSeconds,
+                localDnsEnabled = settings.localDnsEnabled,
+                localDnsPort = settings.localDnsPort,
+                startupMode = settings.startupMode,
+                pingWatchdogSeconds = settings.pingWatchdogSeconds,
+                trafficWarmupEnabled = settings.trafficWarmupEnabled,
+                trafficWarmupProbeCount = settings.trafficWarmupProbeCount,
+                trafficKeepaliveIntervalSeconds = settings.trafficKeepaliveIntervalSeconds,
+                logLevel = settings.logLevel,
+            )
+        }
+    }
+}
+
 data class ResolverTextValidation(
     val normalizedResolvers: List<String>,
     val invalidEntries: List<String>,
@@ -84,6 +216,8 @@ data class WhiteDnsSettings(
     val connectionProfiles: List<ConnectionProfile> = listOf(ConnectionProfile.defaultProfile()),
     val selectedResolverProfileId: String = "",
     val resolverProfiles: List<ResolverProfile> = emptyList(),
+    val selectedAdvancedProfileId: String = AdvancedSettingsProfile.DefaultId,
+    val advancedProfiles: List<AdvancedSettingsProfile> = emptyList(),
     val serverMode: String = "custom",
     val customServerDomain: String = "",
     val customServerEncryptionKey: String = "",
@@ -285,6 +419,8 @@ object WhiteDnsRuntimeProxy {
     const val ListenPortInt = 10886
     const val HttpProxyPort = "10887"
     const val HttpProxyPortInt = 10887
+    const val LocalDnsPort = "10888"
+    const val LocalDnsPortInt = 10888
 }
 
 object WhiteDnsOptions {
@@ -401,6 +537,16 @@ fun WhiteDnsSettings.normalizedResolverProfiles(): List<ResolverProfile> {
         .filter { it.resolverText.isNotBlank() }
 }
 
+fun WhiteDnsSettings.normalizedAdvancedProfiles(): List<AdvancedSettingsProfile> {
+    val customProfiles = advancedProfiles
+        .filter { it.id.isNotBlank() && it.id != AdvancedSettingsProfile.DefaultId }
+        .distinctBy { it.id }
+        .mapIndexed { index, profile ->
+            profile.copy(name = profile.name.ifBlank { "Advanced ${index + 1}" })
+        }
+    return listOf(AdvancedSettingsProfile.defaultProfile()) + customProfiles
+}
+
 fun WhiteDnsSettings.selectedConnectionProfile(): ConnectionProfile {
     val profiles = normalizedConnectionProfiles()
     return profiles.firstOrNull { it.id == selectedConnectionProfileId } ?: profiles.first()
@@ -410,10 +556,20 @@ fun WhiteDnsSettings.selectedResolverProfile(): ResolverProfile? {
     return normalizedResolverProfiles().firstOrNull { it.id == selectedResolverProfileId }
 }
 
+fun WhiteDnsSettings.selectedAdvancedProfile(): AdvancedSettingsProfile {
+    val profiles = normalizedAdvancedProfiles()
+    return profiles.firstOrNull { it.id == selectedAdvancedProfileId } ?: profiles.first()
+}
+
+fun WhiteDnsSettings.matchesAdvancedProfile(profile: AdvancedSettingsProfile): Boolean {
+    return AdvancedSettingsProfile.fromSettings(this, id = profile.id, name = profile.name) == profile
+}
+
 fun WhiteDnsSettings.syncSelectedConnectionProfileFields(): WhiteDnsSettings {
     val resolverProfiles = normalizedResolverProfiles()
     val resolverIds = resolverProfiles.map { it.id }.toSet()
     val profiles = normalizedConnectionProfiles()
+    val advancedProfiles = normalizedAdvancedProfiles()
     val selected = profiles.firstOrNull { it.id == selectedConnectionProfileId } ?: profiles.first()
     val selectedConnectionMode = normalizeConnectionMode(connectionMode)
     val modeSyncedProfiles = profiles.map { profile ->
@@ -428,11 +584,16 @@ fun WhiteDnsSettings.syncSelectedConnectionProfileFields(): WhiteDnsSettings {
         ?: selectedResolverProfileId.takeIf { it in resolverIds }
         ?: ""
     val selectedResolver = resolverProfiles.firstOrNull { it.id == selectedResolverId }
+    val selectedAdvancedId = selectedAdvancedProfileId
+        .takeIf { profileId -> advancedProfiles.any { it.id == profileId } }
+        ?: AdvancedSettingsProfile.DefaultId
     return copy(
         selectedConnectionProfileId = selected.id,
         connectionProfiles = modeSyncedProfiles,
         selectedResolverProfileId = selectedResolverId,
         resolverProfiles = resolverProfiles,
+        selectedAdvancedProfileId = selectedAdvancedId,
+        advancedProfiles = advancedProfiles.filter { it.id != AdvancedSettingsProfile.DefaultId },
         resolverText = selectedResolver?.resolverText ?: resolverText,
         serverMode = selected.serverMode,
         customServerDomain = selected.customServerDomain,
@@ -455,10 +616,113 @@ fun WhiteDnsSettings.runtimeConnectionSettings(): WhiteDnsSettings {
             socks5Authentication = false,
             socksUsername = "",
             socksPassword = "",
+            localDnsEnabled = false,
+            localDnsPort = WhiteDnsRuntimeProxy.LocalDnsPort,
         )
     } else {
-        settings
+        settings.copy(
+            localDnsEnabled = true,
+            localDnsPort = WhiteDnsRuntimeProxy.LocalDnsPort,
+        )
     }
+}
+
+fun WhiteDnsSettings.applyAdvancedProfile(profile: AdvancedSettingsProfile): WhiteDnsSettings {
+    return copy(
+        selectedAdvancedProfileId = profile.id,
+        listenIp = profile.listenIp,
+        listenPort = profile.listenPort,
+        httpProxyEnabled = profile.httpProxyEnabled,
+        httpProxyPort = profile.httpProxyPort,
+        socks5Authentication = profile.socks5Authentication,
+        socksUsername = profile.socksUsername,
+        socksPassword = profile.socksPassword,
+        balancingStrategy = profile.balancingStrategy,
+        uploadDuplication = profile.uploadDuplication,
+        downloadDuplication = profile.downloadDuplication,
+        uploadCompression = profile.uploadCompression,
+        downloadCompression = profile.downloadCompression,
+        baseEncodeData = profile.baseEncodeData,
+        minUploadMtu = profile.minUploadMtu,
+        minDownloadMtu = profile.minDownloadMtu,
+        maxUploadMtu = profile.maxUploadMtu,
+        maxDownloadMtu = profile.maxDownloadMtu,
+        mtuTestRetriesResolvers = profile.mtuTestRetriesResolvers,
+        mtuTestTimeoutResolvers = profile.mtuTestTimeoutResolvers,
+        mtuTestParallelismResolvers = profile.mtuTestParallelismResolvers,
+        mtuTestRetriesLogs = profile.mtuTestRetriesLogs,
+        mtuTestTimeoutLogs = profile.mtuTestTimeoutLogs,
+        mtuTestParallelismLogs = profile.mtuTestParallelismLogs,
+        rxTxWorkers = profile.rxTxWorkers,
+        tunnelProcessWorkers = profile.tunnelProcessWorkers,
+        tunnelPacketTimeoutSeconds = profile.tunnelPacketTimeoutSeconds,
+        dispatcherIdlePollIntervalSeconds = profile.dispatcherIdlePollIntervalSeconds,
+        txChannelSize = profile.txChannelSize,
+        rxChannelSize = profile.rxChannelSize,
+        resolverUdpConnectionPoolSize = profile.resolverUdpConnectionPoolSize,
+        streamQueueInitialCapacity = profile.streamQueueInitialCapacity,
+        orphanQueueInitialCapacity = profile.orphanQueueInitialCapacity,
+        dnsResponseFragmentStoreCapacity = profile.dnsResponseFragmentStoreCapacity,
+        maxActiveStreams = profile.maxActiveStreams,
+        localHandshakeTimeoutSeconds = profile.localHandshakeTimeoutSeconds,
+        socksUdpAssociateReadTimeoutSeconds = profile.socksUdpAssociateReadTimeoutSeconds,
+        clientTerminalStreamRetentionSeconds = profile.clientTerminalStreamRetentionSeconds,
+        clientCancelledSetupRetentionSeconds = profile.clientCancelledSetupRetentionSeconds,
+        sessionInitRetryBaseSeconds = profile.sessionInitRetryBaseSeconds,
+        sessionInitRetryStepSeconds = profile.sessionInitRetryStepSeconds,
+        sessionInitRetryLinearAfter = profile.sessionInitRetryLinearAfter,
+        sessionInitRetryMaxSeconds = profile.sessionInitRetryMaxSeconds,
+        sessionInitBusyRetryIntervalSeconds = profile.sessionInitBusyRetryIntervalSeconds,
+        localDnsEnabled = profile.localDnsEnabled,
+        localDnsPort = profile.localDnsPort,
+        startupMode = profile.startupMode,
+        pingWatchdogSeconds = profile.pingWatchdogSeconds,
+        trafficWarmupEnabled = profile.trafficWarmupEnabled,
+        trafficWarmupProbeCount = profile.trafficWarmupProbeCount,
+        trafficKeepaliveIntervalSeconds = profile.trafficKeepaliveIntervalSeconds,
+        logLevel = profile.logLevel,
+    ).syncSelectedConnectionProfileFields()
+}
+
+fun WhiteDnsSettings.selectAdvancedProfile(profileId: String): WhiteDnsSettings {
+    val selectedProfile = normalizedAdvancedProfiles().firstOrNull { it.id == profileId }
+        ?: AdvancedSettingsProfile.defaultProfile()
+    return applyAdvancedProfile(selectedProfile)
+}
+
+fun WhiteDnsSettings.saveSelectedAdvancedProfile(): WhiteDnsSettings {
+    if (selectedAdvancedProfileId == AdvancedSettingsProfile.DefaultId) {
+        return syncSelectedConnectionProfileFields()
+    }
+    val customProfiles = normalizedAdvancedProfiles().filter { it.id != AdvancedSettingsProfile.DefaultId }
+    if (customProfiles.none { it.id == selectedAdvancedProfileId }) {
+        return syncSelectedConnectionProfileFields()
+    }
+    val currentProfile = selectedAdvancedProfile()
+    val updatedProfile = AdvancedSettingsProfile.fromSettings(
+        settings = this,
+        id = currentProfile.id,
+        name = currentProfile.name,
+    )
+    return copy(
+        advancedProfiles = customProfiles.map { profile ->
+            if (profile.id == updatedProfile.id) updatedProfile else profile
+        },
+    ).syncSelectedConnectionProfileFields()
+}
+
+fun WhiteDnsSettings.saveCurrentAdvancedProfileAs(name: String): WhiteDnsSettings {
+    val profileName = name.trim().ifBlank { "Advanced Settings" }
+    val profileId = AdvancedSettingsProfile.newId()
+    val profile = AdvancedSettingsProfile.fromSettings(
+        settings = this,
+        id = profileId,
+        name = profileName,
+    )
+    return copy(
+        selectedAdvancedProfileId = profileId,
+        advancedProfiles = normalizedAdvancedProfiles().filter { it.id != AdvancedSettingsProfile.DefaultId } + profile,
+    ).syncSelectedConnectionProfileFields()
 }
 
 fun WhiteDnsSettings.selectConnectionProfile(profileId: String): WhiteDnsSettings {
@@ -679,6 +943,7 @@ private fun <T> List<T>.moved(fromIndex: Int, toIndex: Int): List<T> {
 fun WhiteDnsSettings.resetAdvancedSettings(): WhiteDnsSettings {
     val defaults = WhiteDnsSettings()
     return copy(
+        selectedAdvancedProfileId = AdvancedSettingsProfile.DefaultId,
         listenIp = defaults.listenIp,
         listenPort = defaults.listenPort,
         httpProxyEnabled = defaults.httpProxyEnabled,
