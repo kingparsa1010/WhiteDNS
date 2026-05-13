@@ -251,7 +251,7 @@ class WhiteDnsVpnService : VpnService() {
             startupFailure = { startupFailure.get() },
         )
         logInfo("SOCKS proxy is ready")
-        startVpnRouting(settings, resolvedSettings)
+        startVpnRouting(sessionId, settings, resolvedSettings)
         monitorStormDnsProcess()
     }
 
@@ -319,6 +319,7 @@ class WhiteDnsVpnService : VpnService() {
     }
 
     private fun startVpnRouting(
+        sessionId: String,
         settings: WhiteDnsSettings,
         resolvedSettings: ResolvedWhiteDnsSettings,
     ) {
