@@ -1,5 +1,6 @@
 package shop.whitedns.client.scan
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -53,5 +54,63 @@ class ScanResolverChunkerTest {
             ),
             validation.normalizedResolvers,
         )
+    }
+
+    @Test
+    fun normalizeScanResolverTextAcceptsCrLfIpv4DefaultPortLists() {
+        val validation = WhiteDnsScannerResultStore.normalizeScanResolverText(
+            "2.144.2.72:53\r\n2.144.2.154:53\r\n2.144.6.75:53\r\n",
+        )
+
+        assertEquals(emptyList<String>(), validation.invalidEntries)
+        assertEquals(
+            listOf("2.144.2.72", "2.144.2.154", "2.144.6.75"),
+            validation.normalizedResolvers,
+        )
+    }
+
+    @Test
+    fun normalizeScanResolverLinesStreamsLargeDefaultPortLists() {
+        val lines = generateSequence(0) { index -> index + 1 }
+            .take(5_000)
+            .map { index -> "10.${index / 256 / 256}.${index / 256 % 256}.${index % 256}:53" }
+
+        val validation = WhiteDnsScannerResultStore.normalizeScanResolverLines(lines)
+
+        assertEquals(emptyList<String>(), validation.invalidEntries)
+        assertEquals(5_000, validation.normalizedResolvers.size)
+        assertEquals("10.0.0.0", validation.normalizedResolvers.first())
+        assertEquals("10.0.19.135", validation.normalizedResolvers.last())
+    }
+
+    @Test
+    fun writePendingScanResolverFileStreamsWithoutKeepingPendingList() {
+        val outputFile = File.createTempFile("scan-resolvers", ".txt").apply {
+            deleteOnExit()
+        }
+        val lines = sequenceOf(
+            "1.1.1.1:53",
+            "8.8.8.8:53",
+            "1.1.1.1:53",
+            "bad resolver",
+            "9.9.9.9:5353",
+        )
+
+        val summary = WhiteDnsScannerResultStore.writePendingScanResolverFile(
+            lines = lines,
+            outputFile = outputFile,
+            excludedResolvers = setOf("8.8.8.8"),
+        )
+
+        assertEquals(
+            ScanResolverFileSummary(
+                totalResolverCount = 3,
+                pendingResolverCount = 2,
+                alreadyValidResolverCount = 1,
+                invalidEntryCount = 1,
+            ),
+            summary,
+        )
+        assertEquals("1.1.1.1\n9.9.9.9", outputFile.readText(Charsets.UTF_8))
     }
 }

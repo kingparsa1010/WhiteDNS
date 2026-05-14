@@ -949,7 +949,7 @@ private fun ScanTabContent(
                     label = "START",
                     emphasized = true,
                     tone = CompactActionTone.Success,
-                    enabled = scanCanStart(scanState),
+                    enabled = scanCanStart(scanState) && !selectedScanProfileNeedsServer,
                     onClick = onScanStartClick,
                 )
                 CompactActionButton(

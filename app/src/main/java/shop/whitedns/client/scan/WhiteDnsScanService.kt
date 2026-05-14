@@ -96,18 +96,13 @@ class WhiteDnsScanService : Service() {
                     ?: throw IllegalStateException("Runtime launch request is missing")
                 val scanRequest = WhiteDnsScanRequestStore.load(applicationContext, sessionId)
                     ?: throw IllegalStateException("Scan launch request is missing")
-                val resolvers = WhiteDnsScannerResultStore.normalizeScanResolverText(
-                    File(scanRequest.resolverFilePath).readText(Charsets.UTF_8),
-                ).normalizedResolvers
-                if (resolvers.isEmpty()) {
-                    throw IllegalStateException("Resolver file is empty")
-                }
+                val resolverFile = File(scanRequest.resolverFilePath)
                 runScan(
                     sessionId = sessionId,
                     sourceName = scanRequest.sourceName,
                     serverProfile = runtimeRequest.serverProfile,
                     settings = runtimeRequest.settings,
-                    resolvers = resolvers,
+                    resolverFile = resolverFile,
                     requestedWorkerCount = scanRequest.workerCount,
                     initialValidResolvers = scanRequest.initialValidResolvers,
                     initialRejectedResolvers = scanRequest.initialRejectedResolvers,
@@ -139,7 +134,7 @@ class WhiteDnsScanService : Service() {
         sourceName: String,
         serverProfile: StormDnsServerProfile,
         settings: WhiteDnsSettings,
-        resolvers: List<String>,
+        resolverFile: File,
         requestedWorkerCount: Int,
         initialValidResolvers: List<String>,
         initialRejectedResolvers: List<String>,
@@ -147,23 +142,28 @@ class WhiteDnsScanService : Service() {
         requestedTotalResolvers: Int,
     ) = coroutineScope {
         val binaryFile = binaryInstaller.installExecutable()
-        val chunks = chunkResolversRoundRobin(resolvers, requestedWorkerCount)
-        val workerStats = Array(chunks.size) { WorkerScanStats(total = chunks[it].size) }
+        val scanRoot = File(File(applicationContext.noBackupFilesDir, "stormdns/scan"), sessionId).apply {
+            mkdirs()
+        }
         val validResolvers = WhiteDnsScannerResultStore.normalizeResolverEntries(initialValidResolvers)
             .toCollection(linkedSetOf())
         val rejectedResolvers = WhiteDnsScannerResultStore.normalizeResolverEntries(initialRejectedResolvers)
             .filterNot(validResolvers::contains)
             .toCollection(linkedSetOf())
+        val workerInputs = partitionResolverFileRoundRobin(
+            resolverFile = resolverFile,
+            scanRoot = scanRoot,
+            requestedWorkerCount = requestedWorkerCount,
+        )
+        val workerStats = Array(workerInputs.size) { WorkerScanStats(total = workerInputs[it].resolverCount) }
         val workerFailures = mutableListOf<String>()
         val stateLock = Any()
         val initialValidResolverCount = validResolvers.size
         val initialRejectedResolverCount = rejectedResolvers.size
         val initialEntryCount = (validResolvers + rejectedResolvers).distinct().size
         val initialProcessedCount = maxOf(initialCompletedResolvers, initialEntryCount)
-        val totalResolverCount = maxOf(requestedTotalResolvers, resolvers.size + initialProcessedCount)
-        val scanRoot = File(File(applicationContext.noBackupFilesDir, "stormdns/scan"), sessionId).apply {
-            mkdirs()
-        }
+        val pendingResolverCount = workerInputs.sumOf { it.resolverCount }
+        val totalResolverCount = maxOf(requestedTotalResolvers, pendingResolverCount + initialProcessedCount)
         val startedAtMillis = System.currentTimeMillis()
         var lastAggregatePublishMillis = 0L
 
@@ -185,7 +185,7 @@ class WhiteDnsScanService : Service() {
                 completedResolvers = completed,
                 validResolvers = liveValidCount.coerceAtMost(totalResolverCount),
                 rejectedResolvers = liveRejectedCount.coerceAtMost(totalResolverCount),
-                workerCount = chunks.size,
+                workerCount = workerInputs.size,
                 startedAtMillis = startedAtMillis,
                 updatedAtMillis = System.currentTimeMillis(),
                 durationMillis = System.currentTimeMillis() - startedAtMillis,
@@ -217,20 +217,31 @@ class WhiteDnsScanService : Service() {
             state?.let(::publishState)
         }
 
-        WhiteDnsScannerResultStore.mergeValidResolvers(applicationContext, validResolvers)
-        publishAggregate(WhiteDnsScanStatus.Running, "Scanning ${resolvers.size} resolvers", true)
+        if (validResolvers.isNotEmpty()) {
+            WhiteDnsScannerResultStore.appendValidResolvers(applicationContext, validResolvers)
+        }
+        if (workerInputs.isEmpty()) {
+            val completedState = aggregateState(
+                WhiteDnsScanStatus.Completed,
+                "Resolver file is empty",
+            )
+            writeScanResults(scanRoot, completedState)
+            publishState(completedState)
+            WhiteDnsScanRequestStore.delete(applicationContext, sessionId)
+            exitForeground()
+            stopSelf()
+            return@coroutineScope
+        }
+        publishAggregate(WhiteDnsScanStatus.Running, "Scanning $pendingResolverCount resolvers", true)
 
-        val jobs = chunks.mapIndexed { index, chunk ->
+        val jobs = workerInputs.mapIndexed { index, workerInput ->
             async(Dispatchers.IO) {
-                val workerId = index + 1
                 try {
                     runWorker(
-                        workerId = workerId,
-                        scanRoot = scanRoot,
+                        workerInput = workerInput,
                         binaryFile = binaryFile,
                         serverProfile = serverProfile,
                         settings = settings,
-                        resolvers = chunk,
                     ) { line ->
                         handleWorkerOutput(
                             workerIndex = index,
@@ -249,9 +260,9 @@ class WhiteDnsScanService : Service() {
                         throw CancellationException("Worker stopped")
                     }
                     synchronized(stateLock) {
-                        workerFailures += "Worker $workerId: ${error.message ?: error::class.java.simpleName}"
+                        workerFailures += "Worker ${workerInput.id}: ${error.message ?: error::class.java.simpleName}"
                     }
-                    publishAggregate(WhiteDnsScanStatus.Running, "Worker $workerId failed", true)
+                    publishAggregate(WhiteDnsScanStatus.Running, "Worker ${workerInput.id} failed", true)
                     false
                 }
             }
@@ -259,7 +270,7 @@ class WhiteDnsScanService : Service() {
 
         val results = jobs.awaitAll()
         val successfulWorkers = results.count { it }
-        val finalStatus = if (successfulWorkers == chunks.size && workerFailures.isEmpty()) {
+        val finalStatus = if (successfulWorkers == workerInputs.size && workerFailures.isEmpty()) {
             WhiteDnsScanStatus.Completed
         } else if (successfulWorkers > 0) {
             WhiteDnsScanStatus.Failed
@@ -304,7 +315,7 @@ class WhiteDnsScanService : Service() {
                 workerStats[workerIndex].valid = progress.valid
                 workerStats[workerIndex].rejected = progress.rejected
             }
-            publishAggregate(WhiteDnsScanStatus.Running, progress.label, false)
+            publishAggregate(WhiteDnsScanStatus.Running, "Scanning", false)
             return
         }
 
@@ -319,20 +330,18 @@ class WhiteDnsScanService : Service() {
                     validCount = validResolvers.size
                 }
                 if (added) {
-                    WhiteDnsScannerResultStore.mergeValidResolvers(applicationContext, listOf(resolver))
+                    WhiteDnsScannerResultStore.appendValidResolvers(applicationContext, listOf(resolver))
                 }
                 publishAggregate(WhiteDnsScanStatus.Running, "Found $validCount valid resolvers", false)
             }
             is StormDnsScanTelemetry.Rejected -> {
                 val resolver = WhiteDnsScannerResultStore.normalizeResolverEntry(telemetry.resolver) ?: return
-                var completed = 0
                 synchronized(stateLock) {
                     if (!validResolvers.contains(resolver)) {
                         rejectedResolvers += resolver
                     }
-                    completed = workerStats.sumOf { it.completed }
                 }
-                publishAggregate(WhiteDnsScanStatus.Running, "Processed $completed resolvers", false)
+                publishAggregate(WhiteDnsScanStatus.Running, "Scanning", false)
             }
             is StormDnsScanTelemetry.Complete -> {
                 synchronized(stateLock) {
@@ -347,18 +356,68 @@ class WhiteDnsScanService : Service() {
         }
     }
 
-    private fun runWorker(
-        workerId: Int,
+    private fun partitionResolverFileRoundRobin(
+        resolverFile: File,
         scanRoot: File,
+        requestedWorkerCount: Int,
+    ): List<WorkerInput> {
+        val workerCount = requestedWorkerCount.coerceAtLeast(1)
+        val workerDirs = List(workerCount) { index ->
+            File(scanRoot, "worker-${index + 1}").apply { mkdirs() }
+        }
+        val resolverFiles = workerDirs.map { workerDir -> File(workerDir, "resolvers.txt") }
+        val counts = IntArray(workerCount)
+        val writers = arrayOfNulls<java.io.BufferedWriter>(workerCount)
+        var totalResolverCount = 0
+
+        try {
+            resolverFile.bufferedReader(Charsets.UTF_8).useLines { lines ->
+                lines.forEach { rawLine ->
+                    val line = rawLine.trim()
+                    if (line.isEmpty() || line.startsWith("#")) {
+                        return@forEach
+                    }
+                    val workerIndex = totalResolverCount % workerCount
+                    val writer = writers[workerIndex] ?: resolverFiles[workerIndex]
+                        .bufferedWriter(Charsets.UTF_8)
+                        .also { writers[workerIndex] = it }
+                    if (counts[workerIndex] > 0) {
+                        writer.newLine()
+                    }
+                    writer.write(line)
+                    counts[workerIndex] += 1
+                    totalResolverCount += 1
+                }
+            }
+        } finally {
+            writers.forEach { writer -> writer?.close() }
+        }
+
+        val inputs = mutableListOf<WorkerInput>()
+        counts.forEachIndexed { index, count ->
+            if (count <= 0) {
+                resolverFiles[index].delete()
+            } else {
+                inputs += WorkerInput(
+                    id = index + 1,
+                    directory = workerDirs[index],
+                    resolverFile = resolverFiles[index],
+                    resolverCount = count,
+                )
+            }
+        }
+        return inputs
+    }
+
+    private fun runWorker(
+        workerInput: WorkerInput,
         binaryFile: File,
         serverProfile: StormDnsServerProfile,
         settings: WhiteDnsSettings,
-        resolvers: List<String>,
         onOutput: (String) -> Unit,
     ): Boolean {
-        val workerDir = File(scanRoot, "worker-$workerId").apply { mkdirs() }
+        val workerDir = workerInput.directory
         val configFile = File(workerDir, "client.toml")
-        val resolversFile = File(workerDir, "resolvers.txt")
         configFile.writeText(
             StormDnsConfigRenderer.renderScanClientToml(
                 serverProfile = serverProfile,
@@ -366,7 +425,6 @@ class WhiteDnsScanService : Service() {
             ),
             Charsets.UTF_8,
         )
-        resolversFile.writeText(resolvers.joinToString(separator = "\n"), Charsets.UTF_8)
 
         var process: Process? = null
         val outputLock = Any()
@@ -378,7 +436,7 @@ class WhiteDnsScanService : Service() {
                 "-config",
                 configFile.absolutePath,
                 "-resolvers",
-                resolversFile.absolutePath,
+                workerInput.resolverFile.absolutePath,
                 "-scan-only",
             )
                 .directory(workerDir)
@@ -672,6 +730,13 @@ class WhiteDnsScanService : Service() {
         var completed: Int = 0,
         var valid: Int = 0,
         var rejected: Int = 0,
+    )
+
+    private data class WorkerInput(
+        val id: Int,
+        val directory: File,
+        val resolverFile: File,
+        val resolverCount: Int,
     )
 
     companion object {

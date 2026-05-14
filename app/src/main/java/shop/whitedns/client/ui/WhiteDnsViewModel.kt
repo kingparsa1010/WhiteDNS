@@ -16,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -481,75 +482,79 @@ class WhiteDnsViewModel(
         scanLaunchJob?.cancel()
         scanLaunchJob = viewModelScope.launch {
             val sessionId = UUID.randomUUID().toString()
-            val baseSettings = uiState.settings.syncSelectedConnectionProfileFields()
-            val scanConnectionProfileId = resolveScanConnectionProfileId(
-                settings = baseSettings,
-                requestedProfileId = uiState.scanConnectionProfileId,
-            )
-            if (scanConnectionProfileId != uiState.scanConnectionProfileId) {
-                scanSettingsStore.saveConnectionProfileId(scanConnectionProfileId)
-                uiState = uiState.copy(scanConnectionProfileId = scanConnectionProfileId)
-            }
-            val settings = baseSettings.copy(
-                selectedConnectionProfileId = scanConnectionProfileId,
-            ).syncSelectedConnectionProfileFields()
-            val serverProfile = selectServerProfile(settings)
-            if (serverProfile == null) {
-                val profileName = settings.selectedConnectionProfile().name.ifBlank { "selected scan profile" }
-                setScanFailure(sessionId, "$profileName requires a StormDNS domain and encryption key")
-                return@launch
-            }
-            val workerCount = uiState.scanWorkerCount.toIntOrNull()
-                ?.coerceAtLeast(1)
-                ?: WhiteDnsScanDefaults.DefaultWorkerCount
-            val imported = withContext(Dispatchers.IO) {
-                runCatching {
+            try {
+                val baseSettings = uiState.settings.syncSelectedConnectionProfileFields()
+                val scanConnectionProfileId = resolveScanConnectionProfileId(
+                    settings = baseSettings,
+                    requestedProfileId = uiState.scanConnectionProfileId,
+                )
+                if (scanConnectionProfileId != uiState.scanConnectionProfileId) {
+                    scanSettingsStore.saveConnectionProfileId(scanConnectionProfileId)
+                    uiState = uiState.copy(scanConnectionProfileId = scanConnectionProfileId)
+                }
+                val workerCount = uiState.scanWorkerCount.toIntOrNull()
+                    ?.coerceAtLeast(1)
+                    ?: WhiteDnsScanDefaults.DefaultWorkerCount
+                val importingState = WhiteDnsScanState(
+                    sessionId = sessionId,
+                    status = WhiteDnsScanStatus.Starting,
+                    sourceName = "Resolver file",
+                    workerCount = workerCount,
+                    updatedAtMillis = System.currentTimeMillis(),
+                    message = "Importing resolver file",
+                )
+                withContext(Dispatchers.IO) {
+                    WhiteDnsScanStateStore.write(appContext, importingState)
+                }
+                uiState = uiState.copy(scanState = importingState)
+
+                val imported = withContext(Dispatchers.IO) {
                     importScanResolverFile(uri, sessionId)
                 }
-            }.getOrElse { error ->
-                setScanFailure(sessionId, "Resolver import failed: ${error.message ?: error::class.java.simpleName}")
-                return@launch
-            }
 
-            withContext(Dispatchers.IO) {
-                WhiteDnsScanRequestStore.save(
-                    context = appContext,
-                    request = WhiteDnsScanLaunchRequest(
-                        id = sessionId,
-                        sourceName = imported.sourceName,
-                        resolverFilePath = imported.file.absolutePath,
-                        workerCount = workerCount.coerceAtLeast(1),
-                        initialValidResolvers = emptyList(),
-                        initialCompletedResolvers = 0,
-                        totalResolvers = imported.pendingResolverCount,
-                    ),
+                withContext(Dispatchers.IO) {
+                    WhiteDnsScanRequestStore.save(
+                        context = appContext,
+                        request = WhiteDnsScanLaunchRequest(
+                            id = sessionId,
+                            sourceName = imported.sourceName,
+                            resolverFilePath = imported.file.absolutePath,
+                            workerCount = workerCount.coerceAtLeast(1),
+                            initialValidResolvers = emptyList(),
+                            initialCompletedResolvers = 0,
+                            totalResolvers = imported.pendingResolverCount,
+                        ),
+                    )
+                }
+
+                val readyStatus = if (imported.pendingResolverCount > 0) {
+                    WhiteDnsScanStatus.Ready
+                } else {
+                    WhiteDnsScanStatus.Completed
+                }
+                val readyState = WhiteDnsScanState(
+                    sessionId = sessionId,
+                    status = readyStatus,
+                    sourceName = imported.sourceName,
+                    totalResolvers = imported.displayResolverCount,
+                    completedResolvers = if (imported.pendingResolverCount > 0) 0 else imported.displayResolverCount,
+                    validResolvers = if (imported.pendingResolverCount > 0) 0 else imported.alreadyValidResolverCount,
+                    rejectedResolvers = 0,
+                    workerCount = workerCount.coerceAtMost(imported.pendingResolverCount.coerceAtLeast(1)),
+                    updatedAtMillis = System.currentTimeMillis(),
+                    message = buildPreparedScanMessage(imported),
+                    validResolverEntries = emptyList(),
+                    rejectedResolverEntries = emptyList(),
                 )
+                withContext(Dispatchers.IO) {
+                    WhiteDnsScanStateStore.write(appContext, readyState)
+                }
+                uiState = uiState.copy(scanState = readyState)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                setScanFailure(sessionId, "Resolver import failed: ${error.message ?: error::class.java.simpleName}")
             }
-
-            val readyStatus = if (imported.pendingResolverCount > 0) {
-                WhiteDnsScanStatus.Ready
-            } else {
-                WhiteDnsScanStatus.Completed
-            }
-            val readyState = WhiteDnsScanState(
-                sessionId = sessionId,
-                status = readyStatus,
-                sourceName = imported.sourceName,
-                totalResolvers = imported.pendingResolverCount,
-                completedResolvers = 0,
-                validResolvers = 0,
-                rejectedResolvers = 0,
-                workerCount = workerCount.coerceAtMost(imported.pendingResolverCount.coerceAtLeast(1)),
-                updatedAtMillis = System.currentTimeMillis(),
-                message = buildPreparedScanMessage(imported),
-                validResolverEntries = emptyList(),
-                rejectedResolverEntries = emptyList(),
-            )
-            WhiteDnsScanStateStore.write(appContext, readyState)
-            syncScannerResultProfile()?.let { updatedSettings ->
-                uiState = uiState.copy(settings = updatedSettings)
-            }
-            uiState = uiState.copy(scanState = readyState)
         }
     }
 
@@ -595,22 +600,16 @@ class WhiteDnsViewModel(
             val workerCount = uiState.scanWorkerCount.toIntOrNull()
                 ?.coerceAtLeast(1)
                 ?: scanRequest.workerCount.coerceAtLeast(1)
-            val pendingResolvers = withContext(Dispatchers.IO) {
-                runCatching {
-                    val scannerResultSet = WhiteDnsScannerResultStore.readValidResolvers(appContext).toSet()
-                    val resolvers = WhiteDnsScannerResultStore.normalizeScanResolverText(
-                        File(scanRequest.resolverFilePath).readText(Charsets.UTF_8),
-                    ).normalizedResolvers
-                        .filterNot(scannerResultSet::contains)
-                        .distinct()
-                    File(scanRequest.resolverFilePath).writeText(resolvers.joinToString(separator = "\n"), Charsets.UTF_8)
-                    resolvers
-                }
-            }.getOrElse { error ->
-                setScanFailure(sessionId, "Scan start failed: ${error.message ?: error::class.java.simpleName}")
+            val resolverFileExists = withContext(Dispatchers.IO) {
+                File(scanRequest.resolverFilePath).isFile
+            }
+            if (!resolverFileExists) {
+                setScanFailure(sessionId, "Scan start failed: resolver file is missing")
                 return@launch
             }
-            val pendingResolverCount = pendingResolvers.size
+            val pendingResolverCount = previousState.totalResolvers
+                .takeIf { it > 0 }
+                ?: scanRequest.totalResolvers
             if (pendingResolverCount == 0) {
                 val completedState = previousState.copy(
                     status = WhiteDnsScanStatus.Completed,
@@ -658,6 +657,15 @@ class WhiteDnsViewModel(
 
     fun stopScan() {
         scanLaunchJob?.cancel()
+        if (uiState.scanState.isRunning) {
+            val stoppedState = uiState.scanState.copy(
+                status = WhiteDnsScanStatus.Stopped,
+                updatedAtMillis = System.currentTimeMillis(),
+                message = "Scan stopped",
+            )
+            WhiteDnsScanStateStore.write(appContext, stoppedState)
+            uiState = uiState.copy(scanState = stoppedState)
+        }
         viewModelScope.launch(Dispatchers.IO) {
             WhiteDnsScanService.stop(appContext)
         }
@@ -706,23 +714,27 @@ class WhiteDnsViewModel(
             val rejectedEntries = WhiteDnsScannerResultStore.normalizeResolverEntries(previousState.rejectedResolverEntries)
                 .filterNot(validEntries::contains)
             val processed = (validEntries + rejectedEntries).toSet()
-            val scannerResultEntries = withContext(Dispatchers.IO) {
-                WhiteDnsScannerResultStore.readValidResolvers(appContext)
-            }
-            val remainingResolvers = withContext(Dispatchers.IO) {
+            val sessionId = UUID.randomUUID().toString()
+            val resolverFile = File(
+                File(File(appContext.noBackupFilesDir, "stormdns/scan"), sessionId).apply { mkdirs() },
+                "resume.resolvers",
+            )
+            val remainingResolverCount = withContext(Dispatchers.IO) {
                 runCatching {
-                    val alreadySavedValid = scannerResultEntries.toSet()
-                    WhiteDnsScannerResultStore.normalizeScanResolverText(
-                        File(scanRequest.resolverFilePath).readText(Charsets.UTF_8),
-                    ).normalizedResolvers
-                        .distinct()
-                        .filterNot { resolver -> resolver in processed || resolver in alreadySavedValid }
+                    val excludedResolvers = processed + WhiteDnsScannerResultStore.readValidResolverSet(appContext)
+                    File(scanRequest.resolverFilePath).bufferedReader(Charsets.UTF_8).useLines { lines ->
+                        WhiteDnsScannerResultStore.writePendingScanResolverFile(
+                            lines = lines,
+                            outputFile = resolverFile,
+                            excludedResolvers = excludedResolvers,
+                        )
+                    }.pendingResolverCount
                 }
             }.getOrElse { error ->
                 setScanFailure(previousSessionId, "Scan resume failed: ${error.message ?: error::class.java.simpleName}")
                 return@launch
             }
-            if (remainingResolvers.isEmpty()) {
+            if (remainingResolverCount == 0) {
                 val updatedState = previousState.copy(
                     updatedAtMillis = System.currentTimeMillis(),
                     message = "No remaining resolvers to resume",
@@ -732,27 +744,18 @@ class WhiteDnsViewModel(
                 return@launch
             }
 
-            val sessionId = UUID.randomUUID().toString()
             val workerCount = uiState.scanWorkerCount.toIntOrNull()
                 ?.coerceAtLeast(1)
                 ?: scanRequest.workerCount.coerceAtLeast(1)
-            val resolverFile = withContext(Dispatchers.IO) {
-                val scanDir = File(File(appContext.noBackupFilesDir, "stormdns/scan"), sessionId).apply {
-                    mkdirs()
-                }
-                File(scanDir, "resume.resolvers").apply {
-                    writeText(remainingResolvers.joinToString(separator = "\n"), Charsets.UTF_8)
-                }
-            }
             val startingState = WhiteDnsScanState(
                 sessionId = sessionId,
                 status = WhiteDnsScanStatus.Starting,
                 sourceName = previousState.sourceName.ifBlank { scanRequest.sourceName },
-                totalResolvers = remainingResolvers.size + processed.size,
+                totalResolvers = remainingResolverCount + processed.size,
                 completedResolvers = processed.size,
                 validResolvers = validEntries.size,
                 rejectedResolvers = rejectedEntries.size,
-                workerCount = workerCount.coerceAtMost(remainingResolvers.size.coerceAtLeast(1)),
+                workerCount = workerCount.coerceAtMost(remainingResolverCount.coerceAtLeast(1)),
                 startedAtMillis = System.currentTimeMillis(),
                 updatedAtMillis = System.currentTimeMillis(),
                 message = "Resuming scan",
@@ -1140,47 +1143,42 @@ class WhiteDnsViewModel(
     }
 
     private fun importScanResolverFile(uri: Uri, sessionId: String): ImportedScanResolverFile {
-        val rawText = appContext.contentResolver.openInputStream(uri)
-            ?.bufferedReader()
-            ?.use { reader -> reader.readText() }
-            ?: throw IllegalArgumentException("Unable to open resolver file")
-        val validation = WhiteDnsScannerResultStore.normalizeScanResolverText(rawText)
-        if (validation.normalizedResolvers.isEmpty()) {
-            throw IllegalArgumentException("No resolver entries found in file")
-        }
-        val scannerResultResolvers = WhiteDnsScannerResultStore.readValidResolvers(appContext)
-        val scannerResultSet = scannerResultResolvers.toSet()
-        val alreadyValidResolvers = validation.normalizedResolvers
-            .filter(scannerResultSet::contains)
-            .distinct()
-        val pendingResolvers = validation.normalizedResolvers
-            .filterNot(scannerResultSet::contains)
-            .distinct()
         val scanDir = File(File(appContext.noBackupFilesDir, "stormdns/scan"), sessionId).apply {
             mkdirs()
         }
-        val resolverFile = File(scanDir, "input.resolvers").apply {
-            writeText(pendingResolvers.joinToString(separator = "\n"), Charsets.UTF_8)
+        val resolverFile = File(scanDir, "input.resolvers")
+        val candidateCount = appContext.contentResolver.openInputStream(uri)
+            ?.bufferedReader(Charsets.UTF_8)
+            ?.useLines { lines ->
+                WhiteDnsScannerResultStore.copyCandidateScanResolverFile(
+                    lines = lines,
+                    outputFile = resolverFile,
+                )
+            }
+            ?: throw IllegalArgumentException("Unable to open resolver file")
+        if (candidateCount == 0) {
+            throw IllegalArgumentException("No resolver entries found in file")
         }
         return ImportedScanResolverFile(
             file = resolverFile,
             sourceName = displayNameForUri(uri),
-            pendingResolverCount = pendingResolvers.size,
-            totalResolverCount = validation.normalizedResolvers.size,
-            alreadyValidResolvers = alreadyValidResolvers,
-            invalidEntryCount = validation.invalidEntries.size,
+            pendingResolverCount = candidateCount,
+            totalResolverCount = candidateCount,
+            alreadyValidResolverCount = 0,
+            invalidEntryCount = 0,
         )
     }
 
     private fun buildPreparedScanMessage(imported: ImportedScanResolverFile): String {
         val parts = mutableListOf<String>()
+        parts += "Imported ${imported.totalResolverCount} resolver${if (imported.totalResolverCount == 1) "" else "s"}"
         if (imported.pendingResolverCount > 0) {
-            parts += "Ready to scan ${imported.pendingResolverCount} resolvers"
+            parts += "Ready to scan ${imported.pendingResolverCount} entr${if (imported.pendingResolverCount == 1) "y" else "ies"}"
         } else {
             parts += "No new resolvers to scan"
         }
-        if (imported.alreadyValidResolvers.isNotEmpty()) {
-            parts += "skipped ${imported.alreadyValidResolvers.size} already in Scanner result"
+        if (imported.alreadyValidResolverCount > 0) {
+            parts += "skipped ${imported.alreadyValidResolverCount} already in Scanner result"
         }
         if (imported.invalidEntryCount > 0) {
             parts += "ignored ${imported.invalidEntryCount} invalid entries"
@@ -1640,9 +1638,12 @@ class WhiteDnsViewModel(
         val sourceName: String,
         val pendingResolverCount: Int,
         val totalResolverCount: Int,
-        val alreadyValidResolvers: List<String>,
+        val alreadyValidResolverCount: Int,
         val invalidEntryCount: Int,
-    )
+    ) {
+        val displayResolverCount: Int
+            get() = if (pendingResolverCount > 0) pendingResolverCount else totalResolverCount
+    }
 
     private fun isIgnoringBatteryOptimizations(context: Context): Boolean {
         val powerManager = context.getSystemService(PowerManager::class.java) ?: return true
