@@ -104,7 +104,7 @@ class StormDnsConfigRendererTest {
                 encryptionMethod = 1,
             ),
             settings = WhiteDnsSettings(
-                listenPort = "10886",
+                listenPort = "18000",
                 localDnsEnabled = true,
                 localDnsPort = "10888",
                 mtuTestParallelismResolvers = "50",
