@@ -848,7 +848,7 @@ class WhiteDnsModelsTest {
         assertEquals("", importedProfile.resolverProfileId)
         assertEquals("proxy", importedSettings.connectionMode)
         assertEquals(emptyList<String>(), importedSettings.resolve().resolverEntries)
-        assertEquals("10886", importedSettings.listenPort)
+        assertEquals("18000", importedSettings.listenPort)
         assertEquals(true, importedSettings.httpProxyEnabled)
         assertEquals(3, importedSettings.balancingStrategy)
         assertEquals("3", importedSettings.uploadDuplication)
@@ -893,7 +893,7 @@ class WhiteDnsModelsTest {
         assertEquals("secret-key", importedProfile.customServerEncryptionKey)
         assertEquals(5, importedProfile.customServerEncryptionMethod)
         assertEquals("proxy", importedSettings.connectionMode)
-        assertEquals("10886", importedSettings.listenPort)
+        assertEquals("18000", importedSettings.listenPort)
         assertEquals(true, importedSettings.httpProxyEnabled)
         assertEquals(false, importedSettings.trafficWarmupEnabled)
         assertEquals("WARN", importedSettings.logLevel)
@@ -945,7 +945,7 @@ class WhiteDnsModelsTest {
         assertEquals(listOf(existingResolverProfile), importedSettings.resolverProfiles)
         assertEquals(existingResolverProfile.id, importedSettings.selectedResolverProfileId)
         assertEquals("proxy", importedSettings.connectionMode)
-        assertEquals("10886", importedSettings.listenPort)
+        assertEquals("18000", importedSettings.listenPort)
         assertEquals(listOf("9.9.9.9"), importedSettings.resolve().resolverEntries)
     }
 
