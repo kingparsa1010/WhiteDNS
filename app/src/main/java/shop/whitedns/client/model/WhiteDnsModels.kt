@@ -240,9 +240,9 @@ data class WhiteDnsSettings(
     val themeMode: String = WhiteDnsThemeMode.System,
     val resolverText: String = "",
     val listenIp: String = "127.0.0.1",
-    val listenPort: String = "10886",
+    val listenPort: String = "18000",
     val httpProxyEnabled: Boolean = true,
-    val httpProxyPort: String = "10887",
+    val httpProxyPort: String = "18001",
     val socks5Authentication: Boolean = false,
     val socksUsername: String = "master_dns_vpn",
     val socksPassword: String = "master_dns_vpn",
@@ -522,10 +522,10 @@ data class WhiteDnsUiState(
 
 object WhiteDnsRuntimeProxy {
     const val ListenIp = "127.0.0.1"
-    const val ListenPort = "10886"
-    const val ListenPortInt = 10886
-    const val HttpProxyPort = "10887"
-    const val HttpProxyPortInt = 10887
+    const val ListenPort = "18000"
+    const val ListenPortInt = 18000
+    const val HttpProxyPort = "18001"
+    const val HttpProxyPortInt = 18001
     const val LocalDnsPort = "10888"
     const val LocalDnsPortInt = 10888
 }
@@ -1550,9 +1550,9 @@ fun WhiteDnsSettings.resolve(): ResolvedWhiteDnsSettings {
         protocolType = protocolType,
         resolverEntries = resolvers,
         listenIp = listenIp.trim().ifEmpty { "127.0.0.1" },
-        listenPort = boundedInt(listenPort, defaultValue = 10886, minValue = 1, maxValue = 65535),
+        listenPort = boundedInt(listenPort, defaultValue = 18000, minValue = 1, maxValue = 65535),
         httpProxyEnabled = httpProxyEnabled,
-        httpProxyPort = boundedInt(httpProxyPort, defaultValue = 10887, minValue = 1, maxValue = 65535),
+        httpProxyPort = boundedInt(httpProxyPort, defaultValue = 18001, minValue = 1, maxValue = 65535),
         socks5Authentication = socks5Authentication,
         socksUsername = socksUsername.take(255),
         socksPassword = socksPassword.take(255),
