@@ -2272,7 +2272,7 @@ private fun AdvancedSettingsImportDialog(
                     tomlText = it
                     importError = null
                 },
-                placeholder = "LISTEN_PORT = 10886\nLOG_LEVEL = \"WARN\"",
+                placeholder = "LISTEN_PORT = 18000\nLOG_LEVEL = \"WARN\"",
                 singleLine = false,
                 minLines = 7,
                 maxLines = 12,
@@ -2351,7 +2351,7 @@ private fun AdvancedSettingsFields(
                 label = "Listen Port",
                 value = settings.listenPort,
                 onValueChange = { onSettingsChange(settings.copy(listenPort = it.filter(Char::isDigit))) },
-                placeholder = "10886",
+                placeholder = "18000",
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     capitalization = KeyboardCapitalization.None,
@@ -2375,7 +2375,7 @@ private fun AdvancedSettingsFields(
                 label = "HTTP Port",
                 value = settings.httpProxyPort,
                 onValueChange = { onSettingsChange(settings.copy(httpProxyPort = it.filter(Char::isDigit))) },
-                placeholder = "10887",
+                placeholder = "18001",
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     capitalization = KeyboardCapitalization.None,
